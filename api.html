@@ -275,6 +275,7 @@
         <div class="metric"><div class="k">电量</div><div class="v" id="m-soc">—</div></div>
         <div class="metric"><div class="k">续航</div><div class="v" id="m-range">—</div></div>
         <div class="metric"><div class="k">OTA 版本</div><div class="v" id="m-ota">—</div></div>
+        <div class="metric"><div class="k">壁纸 / 主题</div><div class="v" id="m-wallpaper">—</div></div>
         <div class="metric wide"><div class="k">3D 车模（vehiclePic3dUrl）</div><div class="v mono" id="m-3d" style="font-size:12px;font-weight:500">—</div></div>
       </div>
       <div class="form-actions" id="summary-actions" hidden>
@@ -1049,6 +1050,14 @@ function renderSummary(summary, meta) {
   setMetric('m-soc', summary.soc == null ? '—' : `${summary.soc}<small>%</small>`);
   setMetric('m-range', summary.rangeKm == null ? '—' : `${escapeHtml(summary.rangeKm)}<small>km</small>`);
   setMetric('m-ota', escapeHtml(summary.otaVersion || '—'));
+  const wallpaperSize = summary.wallpaperWidth && summary.wallpaperHeight
+    ? `${summary.wallpaperWidth}×${summary.wallpaperHeight}`
+    : '';
+  const wallpaperText = wallpaperSize
+    ? `${escapeHtml(wallpaperSize)}<small>${summary.supportCustomWallpaper ? '自定义' : '固定'}</small>`
+    : (summary.supportCustomWallpaper ? '支持自定义' : '—');
+  setMetric('m-wallpaper', wallpaperText);
+  $('m-wallpaper').title = `主题商店：${summary.themeShopFlag === '1' ? '开' : '关'}${summary.themeShopNewFlag === '1' ? '（有新品）' : ''}`;
   const pic3d = summary.pic3d;
   const pic3dUrl = safeHttpUrl(pic3d);
   $('m-3d').innerHTML = pic3dUrl

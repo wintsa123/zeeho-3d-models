@@ -41,8 +41,8 @@
 | 文件 | 角色 |
 | --- | --- |
 | `sdk/zeeho-api.js` | **零依赖 SDK**：纯 JS SHA-1 / MD5、签名、`ZeehoClient`、便捷方法与 `pickVehicleSummary`。浏览器与 Node 通用，不依赖 DOM |
-| `sdk/endpoints.js` | 接口目录元数据（面板来源 39 项，其中 36 项有 panelId；另含 3.0.6 补充端点，共 57 项），调试台表单与 CLI 共用 |
-| `api.html` | **调试台**：分组端点列表、参数表单、JSON 响应、车况 / OTA 概览 |
+| `sdk/endpoints.js` | 接口目录元数据（面板来源 39 项，其中 36 项有 panelId；另含 3.0.6 补充端点，共 69 项），调试台表单与 CLI 共用 |
+| `api.html` | **调试台**：分组端点列表、参数表单、JSON 响应、车况 / OTA / 壁纸主题概览 |
 | `tools/zeeho-cli.mjs` | **CLI**：`login` / `vehicle` / `ota` / `watch` / `models` / `call` |
 
 ## 2. 签名算法
@@ -363,6 +363,44 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
   `{present:true,keys:[...]}`，必须显式加 `--show-secrets` 才输出原值（该开关同样影响
   `location` 与 `wifiAddress` 里的 Wi-Fi 密码）。
 
+
+### 5.11 壁纸与主题（`app:`，3.0.6）
+
+`vehicleHomePageV2` 里与壁纸/主题相关的字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `supportCustomWallpaper` | 是否支持自定义壁纸 |
+| `wallpaperResolutionWidth` / `wallpaperResolutionHeight` | 壁纸分辨率；本车实测为 `1024×600`（部分固件/服务端返回 null） |
+| `subjectWallpaperConfig` | 内置壁纸配置的 **JSON 字符串**，元素含 `name`、`type`、`url`、`subjectUrl` |
+| `themeShopFlag` / `themeShopNewFlag` | 主题商店是否开放 / 是否有新品；本车实测 `0` |
+| `appThemeRgb` / `appChargeRgb` | App 主题色 / 充电主题色 |
+| `appThemeImage` / `appChargeImage` | App 主题图 / 充电主题图 |
+
+壁纸接口（`/v1.0/app/cfmotoserverapp/vehicle/wallpaper/`）：
+
+| 方法 | 路径 | 关键参数 | 返回 / 状态 |
+| --- | --- | --- | --- |
+| GET | `pageVehicleWallpaper` | query: vinNo, pageNum, pageSize | **实测 10000**：`total` / `list`（id、wallpaperName、useState、wallpaperContent、mmiSubjectConfigId） |
+| GET | `getUserWallpaperCount` | query: vinNo | **实测 10000**：数字 |
+| GET | `getWallpaperVehicle/{id}` | path: id | **实测 10000**：适用车型数组，如 `["AE5i"]` |
+| GET | `vehicleWallpaperDetail/{id}` | path: id；query: vinNo | **实测 10000**：壁纸详情；不带 vinNo 返回 40000 |
+| GET | `useWallpaperProgress/{recordId}` | path: recordId | 下发进度；recordId 不是壁纸 id，未验证 |
+| POST | `useWallpaper` | body：id / vinNo 等 | 写操作：下发壁纸到车机，未执行 |
+| DELETE | `deleteWallpaperV2/{id}` | path: id | 写操作：删壁纸，未执行 |
+| PUT | `update/{id}` | path: id；body：壁纸信息 | 写操作：修改壁纸信息，未执行 |
+| POST | `save` | multipart 图片 | 写操作：上传自定义壁纸；调试台只发 JSON，文件字段未验证 |
+| POST | `bluetooth/report` | body：vinNo / id / status | 写操作：蓝牙传输状态上报，未验证 |
+
+主题接口：
+
+| 方法 | 路径 | 关键参数 | 状态 |
+| --- | --- | --- | --- |
+| GET | `vehicleTheme/list` | query: vinNo | 3.0.6 存在该路径；本车 `themeShopFlag=0`，实测 40000，参数/返回待主题商店开通后验证 |
+| GET | `theme/one` | query: themeId | 3.0.6 存在该路径；themeId 来自主题列表，实测 40000，待验证 |
+
+> 结论：**壁纸的列表/数量/适用车型/详情已经实测可用**；`useWallpaper`、删除、上传、蓝牙上报属于写操作，只登记未执行；主题列表/详情受 `themeShopFlag` 限制，当前车辆拿不到数据。
+
 ## 6. 错误码
 
 | code | HTTP | 含义 | 常见触发 / 排查方向 |
@@ -405,6 +443,7 @@ node --test tests/*.test.mjs
 ```bash
 node tools/zeeho-cli.mjs vehicle --vin {VIN}                        # 车辆列表 + 车况概览
 node tools/zeeho-cli.mjs ota --vin {VIN}                            # 仪表 OTA / 固件包 / 历史
+node tools/zeeho-cli.mjs wallpaper --vin {VIN} [--id {wallpaperId}]  # 壁纸列表 / 详情
 node tools/zeeho-cli.mjs watch --vin {VIN} --every 600 --hours 2    # 轮询，发现新包即下载并打 sha256
 node tools/zeeho-cli.mjs login --phone {phone} [--code 123456]      # 登录，token 写入 ~/.zeeho_token.json
 node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点 id 或路径直接调

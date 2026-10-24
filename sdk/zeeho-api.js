@@ -647,6 +647,62 @@ export class ZeehoClient {
     return this.request({ path: `${PATHS.app}dbpoint/send`, method: 'POST', body: payload, token });
   }
 
+  /* ------------------------- 壁纸与主题（3.0.6） ------------------------- */
+
+  /** GET vehicle/wallpaper/pageVehicleWallpaper —— 当前账号的自定义壁纸列表。 */
+  wallpaperPage(vin, { pageNum = 1, pageSize = 20 } = {}, token) {
+    return this.request({
+      path: `${PATHS.app}vehicle/wallpaper/pageVehicleWallpaper`,
+      method: 'GET',
+      query: { vinNo: vin, pageNum, pageSize },
+      token,
+    });
+  }
+
+  /** GET vehicle/wallpaper/getUserWallpaperCount —— 自定义壁纸数量。 */
+  wallpaperCount(vin, token) {
+    return this.request({
+      path: `${PATHS.app}vehicle/wallpaper/getUserWallpaperCount`,
+      method: 'GET',
+      query: { vinNo: vin },
+      token,
+    });
+  }
+
+  /** GET vehicle/wallpaper/vehicleWallpaperDetail/{id} —— 壁纸详情（需要 vinNo）。 */
+  wallpaperDetail(id, vin, token) {
+    return this.request({
+      path: `${PATHS.app}vehicle/wallpaper/vehicleWallpaperDetail/${encodeURIComponent(id)}`,
+      method: 'GET',
+      query: { vinNo: vin },
+      token,
+    });
+  }
+
+  /** GET vehicle/wallpaper/getWallpaperVehicle/{id} —— 壁纸适用车型。 */
+  wallpaperVehicles(id, token) {
+    return this.request({
+      path: `${PATHS.app}vehicle/wallpaper/getWallpaperVehicle/${encodeURIComponent(id)}`,
+      method: 'GET',
+      token,
+    });
+  }
+
+  /** GET vehicleTheme/list —— 车机主题列表（是否开放取决于 themeShopFlag）。 */
+  themeList(vin, token) {
+    return this.request({ path: `${PATHS.app}vehicleTheme/list`, method: 'GET', query: { vinNo: vin }, token });
+  }
+
+  /** GET theme/one —— 车机主题详情。 */
+  themeDetail(themeId, token) {
+    return this.request({ path: `${PATHS.app}theme/one`, method: 'GET', query: { themeId }, token });
+  }
+
+  /** POST vehicle/wallpaper/useWallpaper —— 使用壁纸（写操作）。 */
+  useWallpaper(payload, token) {
+    return this.request({ path: `${PATHS.app}vehicle/wallpaper/useWallpaper`, method: 'POST', body: payload, token });
+  }
+
   /** POST vehicleSet/network/unlock —— 云解锁（一次性 AES）。 */
   networkUnlock(payload, token) {
     return this.request({ path: `${PATHS.app}vehicleSet/network/unlock`, method: 'POST', body: payload, token });
@@ -680,6 +736,22 @@ export function pickVehicleSummary(home) {
     charging,
     chargeState: data.chargeState ?? null,
     wifiAddress: data.wifiAddress || '',
+    supportCustomWallpaper: data.supportCustomWallpaper === true
+      || ['1', 'true', 'TRUE'].includes(String(data.supportCustomWallpaper)),
+    wallpaperWidth: Number(data.wallpaperResolutionWidth) || null,
+    wallpaperHeight: Number(data.wallpaperResolutionHeight) || null,
+    themeShopFlag: String(data.themeShopFlag ?? ''),
+    themeShopNewFlag: String(data.themeShopNewFlag ?? ''),
+    appThemeRgb: data.appThemeRgb || '',
+    appChargeRgb: data.appChargeRgb || '',
+    appThemeImage: data.appThemeImage || '',
+    appChargeImage: data.appChargeImage || '',
+    wallpaperConfig: (() => {
+      try {
+        const parsed = JSON.parse(data.subjectWallpaperConfig || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+      } catch { return []; }
+    })(),
     refreshTime: data.refreshTime || '',
     encryptInfo: data.encryptInfo || null,
     location: data.location || null,

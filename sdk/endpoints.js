@@ -22,6 +22,7 @@
 export const GROUPS = [
   { id: 'auth', label: '登录与版本', desc: '手机号登录、App 版本检查' },
   { id: 'vehicle', label: '车辆', desc: '车况、电池、胎压、设置能力' },
+  { id: 'wallpaper', label: '壁纸与主题', desc: '自定义壁纸、车机主题（3.0.6 新增）' },
   { id: 'ride', label: '骑行', desc: '最近骑行、月度统计、轨迹与画像' },
   { id: 'ota', label: 'OTA / 固件', desc: '版本比对、仪表固件包、升级状态（3.0.6 新增）' },
   { id: 'message', label: '消息', desc: '未读数、列表、已读/清除' },
@@ -30,7 +31,6 @@ export const GROUPS = [
   { id: 'control', label: '车控（写）', desc: '寻车、云解锁、属性写入 —— 会改车，谨慎操作' },
 ];
 
-/** @type {Array<object>} */
 export const ENDPOINTS = [
   /* ------------------------------- 登录 ------------------------------- */
   {
@@ -434,6 +434,96 @@ export const ENDPOINTS = [
     path: '/v1.0/app/cfmotoserverapp/vehicleSet/motoPlay/one',
     params: [], body: {}, auth: 'token', source: 'panel', danger: true,
   },
+  /* --------------------------- 壁纸与主题 --------------------------- */
+  {
+    id: 'wallpaper_page', group: 'wallpaper', label: '壁纸列表（分页）', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/pageVehicleWallpaper',
+    params: [
+      { in: 'query', key: 'vinNo', label: 'VIN', example: 'TESTVIN0000000001', required: true },
+      { in: 'query', key: 'pageNum', label: '页码', example: '1' },
+      { in: 'query', key: 'pageSize', label: '每页', example: '20' },
+    ],
+    auth: 'token', source: 'app306',
+    note: '实测返回 total/list；list 项含 id、wallpaperName、useState、displayWallpaperSet、wallpaperContent、mmiSubjectConfigId、wallpaperConfigSnapshot。',
+  },
+  {
+    id: 'wallpaper_count', group: 'wallpaper', label: '我的壁纸数量', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/getUserWallpaperCount',
+    params: [{ in: 'query', key: 'vinNo', label: 'VIN', example: 'TESTVIN0000000001', required: true }],
+    auth: 'token', source: 'app306',
+    note: '实测返回数字（当前账号 2 张）。',
+  },
+  {
+    id: 'wallpaper_vehicle', group: 'wallpaper', label: '壁纸适用车型', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/getWallpaperVehicle/{id}',
+    params: [{ in: 'path', key: 'id', label: '壁纸 ID', example: '100000', required: true }],
+    auth: 'token', source: 'app306',
+    note: '实测返回车型数组，例如 ["AE5i"]。',
+  },
+  {
+    id: 'wallpaper_detail', group: 'wallpaper', label: '壁纸详情', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/vehicleWallpaperDetail/{id}',
+    params: [
+      { in: 'path', key: 'id', label: '壁纸 ID', example: '100000', required: true },
+      { in: 'query', key: 'vinNo', label: 'VIN', example: 'TESTVIN0000000001', required: true },
+    ],
+    auth: 'token', source: 'app306',
+    note: '实测需要 vinNo；返回壁纸详情、wallpaperContent（JSON 字符串）和主题配置 ID。',
+  },
+  {
+    id: 'wallpaper_use', group: 'wallpaper', label: '使用壁纸', method: 'POST',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/useWallpaper',
+    params: [], body: { id: '100000', vinNo: 'TESTVIN0000000001' }, auth: 'token', source: 'app306', danger: true,
+    note: '写操作：把壁纸下发到车机。body 字段以实际抓包为准（id / wallpaperId），本仓库未执行。',
+  },
+  {
+    id: 'wallpaper_delete', group: 'wallpaper', label: '删除壁纸', method: 'DELETE',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/deleteWallpaperV2/{id}',
+    params: [{ in: 'path', key: 'id', label: '壁纸 ID', example: '100000', required: true }],
+    auth: 'token', source: 'app306', danger: true,
+    note: '写操作：删除账号下的自定义壁纸，未执行验证。',
+  },
+  {
+    id: 'wallpaper_update', group: 'wallpaper', label: '修改壁纸信息', method: 'PUT',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/update/{id}',
+    params: [{ in: 'path', key: 'id', label: '壁纸 ID', example: '100000', required: true }],
+    body: { wallpaperName: '新壁纸名' }, auth: 'token', source: 'app306', danger: true,
+    note: '写操作：改壁纸名称/配置，未执行验证。',
+  },
+  {
+    id: 'wallpaper_save', group: 'wallpaper', label: '上传自定义壁纸', method: 'POST',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/save',
+    params: [], body: { wallpaperName: '我的壁纸' }, auth: 'token', source: 'app306', danger: true,
+    note: '写操作：App 用 multipart 上传图片；调试台只发 JSON，需抓包补文件字段，未验证。',
+  },
+  {
+    id: 'wallpaper_progress', group: 'wallpaper', label: '壁纸下发进度', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/useWallpaperProgress/{recordId}',
+    params: [{ in: 'path', key: 'recordId', label: '下发记录 ID', example: '100000', required: true }],
+    auth: 'token', source: 'app306',
+    note: '写操作的进度查询；参数是 recordId，不是壁纸 id。未验证。',
+  },
+  {
+    id: 'wallpaper_bt_report', group: 'wallpaper', label: '壁纸蓝牙传输上报', method: 'POST',
+    path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/bluetooth/report',
+    params: [], body: { vinNo: 'TESTVIN0000000001', id: '100000', status: '1' }, auth: 'token', source: 'app306', danger: true,
+    note: '写操作：车机通过蓝牙传壁纸后的状态上报；字段未验证。',
+  },
+  {
+    id: 'theme_list', group: 'wallpaper', label: '车机主题列表', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/vehicleTheme/list',
+    params: [{ in: 'query', key: 'vinNo', label: 'VIN', example: 'TESTVIN0000000001', required: true }],
+    auth: 'token', source: 'app306',
+    note: '3.0.6 有该路径，但本车 themeShopFlag=0，实测只返回 40000；参数/返回结构待主题商店开通后验证。',
+  },
+  {
+    id: 'theme_one', group: 'wallpaper', label: '车机主题详情', method: 'GET',
+    path: '/v1.0/app/cfmotoserverapp/theme/one',
+    params: [{ in: 'query', key: 'themeId', label: '主题 ID', example: '6', required: true }],
+    auth: 'token', source: 'app306',
+    note: '3.0.6 有该路径；themeId 来自主题列表。实测 40000，待验证。',
+  },
+
 ];
 
 /** 按分组取接口。 */

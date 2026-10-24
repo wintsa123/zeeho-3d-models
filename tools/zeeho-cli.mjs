@@ -248,6 +248,52 @@ async function cmdOta(options, config) {
   if (c && (c.title || c.content)) console.log(`  红点内容        ${c.title || ''} ${String(c.content || '').slice(0, 60)}`);
 }
 
+async function cmdWallpaper(options, config) {
+  const client = makeClient(config);
+  if (!client.token) return fail('缺少 token：先 login，或设置 ZEEHO_TOKEN');
+  const vin = options.vin;
+  if (!vin) return fail('--vin 必填');
+
+  if (options.id) {
+    const [detail, vehicles] = await Promise.all([
+      client.wallpaperDetail(options.id, vin, client.token),
+      client.wallpaperVehicles(options.id, client.token),
+    ]);
+    const data = detail.data?.data;
+    const carTypes = vehicles.data?.data;
+    if (options.json) {
+      return printJson(redactSensitive({ detail: data, vehicles: carTypes }, Boolean(options['show-secrets'])));
+    }
+    if (!data) return fail(`壁纸详情读取失败：${detail.data?.message || detail.text.slice(0, 120)}`);
+    console.log(`壁纸 #${data.id} ${data.wallpaperName || ''}`);
+    console.log(`  使用状态   ${data.useState === 1 ? '使用中' : data.useState}`);
+    console.log(`  显示设置   ${data.displayWallpaperSet}`);
+    console.log(`  创建时间   ${data.createTime || '—'}`);
+    console.log(`  适用车型   ${Array.isArray(carTypes) ? carTypes.join(', ') : '—'}`);
+    if (data.wallpaperContent) {
+      try {
+        const items = JSON.parse(data.wallpaperContent);
+        for (const item of items) console.log(`  ${String(item.type) === '1' ? '小屏' : '主页'}  ${item.url}`);
+      } catch { console.log(`  wallpaperContent  ${String(data.wallpaperContent).slice(0, 120)}`); }
+    }
+    return;
+  }
+
+  const [count, page] = await Promise.all([
+    client.wallpaperCount(vin, client.token),
+    client.wallpaperPage(vin, { pageNum: 1, pageSize: 20 }, client.token),
+  ]);
+  if (options.json) {
+    return printJson(redactSensitive({ count: count.data?.data, page: page.data?.data }, Boolean(options['show-secrets'])));
+  }
+  const list = page.data?.data?.list || [];
+  console.log(`壁纸数量：${count.data?.data ?? '—'}；本页 ${list.length} 条`);
+  for (const item of list) {
+    console.log(`  #${item.id}\t${item.wallpaperName || '?'}\t${item.useState === 1 ? '使用中' : '未使用'}\t${item.createTime || ''}`);
+  }
+  console.log('用 --id <壁纸ID> 查看详情；写操作（use/delete/upload）请用 call + --yes。');
+}
+
 async function cmdWatch(options, config) {
   const client = makeClient(config);
   if (!client.token) return fail('缺少 token：先 login，或设置 ZEEHO_TOKEN');
@@ -397,6 +443,7 @@ const HELP = `极核接口 CLI
   login    --phone <手机号> [--code <验证码>]        发码并登录，token 存到 ~/.zeeho_token.json
   vehicle  [--vin <VIN>] [--json]                    车辆列表 + 车况概览
   ota      --vin <VIN> [--download <目录>] [--json]   仪表 OTA 信息 / 固件包 / 历史
+  wallpaper --vin <VIN> [--id <壁纸ID>] [--json]      壁纸数量/列表/详情
   watch    --vin <VIN> [--every 600] [--hours 2] [--once] [--download <目录>]
   models   [--vin <VIN> | --url <glb 地址>] [--name/--title/--note] [--out models]
   call     <接口 id | 路径> [--query k=v ...] [--body JSON] [--method GET] [--json] [--yes]
@@ -416,6 +463,7 @@ async function main() {
       phone: { type: 'string' },
       code: { type: 'string' },
       vin: { type: 'string' },
+      id: { type: 'string' },
       download: { type: 'string' },
       every: { type: 'string' },
       hours: { type: 'string' },
@@ -455,6 +503,7 @@ async function main() {
     case 'login': return cmdLogin(options, config);
     case 'vehicle': return cmdVehicle(options, config);
     case 'ota': return cmdOta(options, config);
+    case 'wallpaper': return cmdWallpaper(options, config);
     case 'watch': return cmdWatch(options, config);
     case 'models': return cmdModels(options, config);
     case 'call': return cmdCall(options, config);

@@ -163,6 +163,15 @@ test('pickVehicleSummary：空 SOC / 字符串布尔值不被误判', () => {
   assert.equal(summary.soc, null);
   assert.equal(summary.rangeKm, null);
   assert.equal(summary.charging, false);
+  const wall = pickVehicleSummary({ data: {
+    supportCustomWallpaper: 'true', wallpaperResolutionWidth: '1024', wallpaperResolutionHeight: '600',
+    themeShopFlag: '1', subjectWallpaperConfig: '[{"name":"主页","type":"2"}]',
+  } });
+  assert.equal(wall.supportCustomWallpaper, true);
+  assert.equal(wall.wallpaperWidth, 1024);
+  assert.equal(wall.wallpaperHeight, 600);
+  assert.equal(wall.themeShopFlag, '1');
+  assert.equal(wall.wallpaperConfig.length, 1);
 });
 
 test('ZeehoClient：非 JSON（网关 XML 401）也能返回而不抛异常', async () => {
@@ -219,5 +228,7 @@ test('接口目录：id 唯一、分组有效、path 参数已声明', () => {
   }
   assert.ok(ENDPOINTS.length >= 40);
   assert.equal(byId('ota_info')?.path, '/v1.0/app/cfmotoserverapp/ota/mmi/info/v2');
+  assert.equal(byId('wallpaper_page')?.path, '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/pageVehicleWallpaper');
+  assert.ok(ENDPOINTS.filter((endpoint) => endpoint.group === 'wallpaper').length >= 10);
   assert.equal(fillPath('/v1.0/x/{vin}', { vin: 'a b' }), '/v1.0/x/a%20b');
 });
