@@ -364,7 +364,7 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
   `location` 与 `wifiAddress` 里的 Wi-Fi 密码）。
 
 
-### 5.11 壁纸与主题（`app:`，3.0.6）
+### 5.11 壁纸与主题（`app:`，3.0.6；主题按车型显示）
 
 `vehicleHomePageV2` 里与壁纸/主题相关的字段：
 
@@ -399,7 +399,7 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 | GET | `vehicleTheme/list` | query: vinNo | 3.0.6 存在该路径；本车 `themeShopFlag=0`，实测 40000，参数/返回待主题商店开通后验证 |
 | GET | `theme/one` | query: themeId | 3.0.6 存在该路径；themeId 来自主题列表，实测 40000，待验证 |
 
-> 结论：**壁纸的列表/数量/适用车型/详情已经实测可用**；`useWallpaper`、删除、上传、蓝牙上报属于写操作，只登记未执行；主题列表/详情受 `themeShopFlag` 限制，当前车辆拿不到数据。
+> 结论：**壁纸的列表/数量/适用车型/详情已经实测可用**；`useWallpaper`、删除、上传、蓝牙上报属于写操作，只登记未执行；主题列表/详情受 `themeShopFlag` 限制，当前 AE5i 的 `themeShopFlag=0`，调试台直接隐藏「车机主题」分组；只有读到 `themeShopFlag=1` 的车型才显示。
 
 ## 6. 错误码
 

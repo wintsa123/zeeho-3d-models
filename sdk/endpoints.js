@@ -22,7 +22,8 @@
 export const GROUPS = [
   { id: 'auth', label: '登录与版本', desc: '手机号登录、App 版本检查' },
   { id: 'vehicle', label: '车辆', desc: '车况、电池、胎压、设置能力' },
-  { id: 'wallpaper', label: '壁纸与主题', desc: '自定义壁纸、车机主题（3.0.6 新增）' },
+  { id: 'wallpaper', label: '车机壁纸', desc: '自定义/内置壁纸、下发与删除（3.0.6）' },
+  { id: 'theme', label: '车机主题（按车型）', desc: '主题商店；仅 themeShopFlag=1 的车型显示（3.0.6）' },
   { id: 'ride', label: '骑行', desc: '最近骑行、月度统计、轨迹与画像' },
   { id: 'ota', label: 'OTA / 固件', desc: '版本比对、仪表固件包、升级状态（3.0.6 新增）' },
   { id: 'message', label: '消息', desc: '未读数、列表、已读/清除' },
@@ -510,14 +511,14 @@ export const ENDPOINTS = [
     note: '写操作：车机通过蓝牙传壁纸后的状态上报；字段未验证。',
   },
   {
-    id: 'theme_list', group: 'wallpaper', label: '车机主题列表', method: 'GET',
+    id: 'theme_list', group: 'theme', label: '车机主题列表', method: 'GET',
     path: '/v1.0/app/cfmotoserverapp/vehicleTheme/list',
     params: [{ in: 'query', key: 'vinNo', label: 'VIN', example: 'TESTVIN0000000001', required: true }],
     auth: 'token', source: 'app306',
     note: '3.0.6 有该路径，但本车 themeShopFlag=0，实测只返回 40000；参数/返回结构待主题商店开通后验证。',
   },
   {
-    id: 'theme_one', group: 'wallpaper', label: '车机主题详情', method: 'GET',
+    id: 'theme_one', group: 'theme', label: '车机主题详情', method: 'GET',
     path: '/v1.0/app/cfmotoserverapp/theme/one',
     params: [{ in: 'query', key: 'themeId', label: '主题 ID', example: '6', required: true }],
     auth: 'token', source: 'app306',

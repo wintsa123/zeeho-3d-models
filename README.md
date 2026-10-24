@@ -56,11 +56,11 @@ app/
 - **登录态复用**：读取 `localStorage['zeeho.token']`。先在面板用手机号登录一次，
   回到调试台刷新即可；也可以手动粘贴 token；
 - **接口目录**：面板来源的 39 个端点 + 从 App 3.0.6 补的 OTA / 版本 / 蓝牙能力码 / 壁纸主题等（共 69 个），
-  按「登录 / 车辆 / 壁纸与主题 / 骑行 / OTA / 消息 / 我的 / 社区 / 车控」分组；
+  按「登录 / 车辆 / 车机壁纸 / 车机主题 / 骑行 / OTA / 消息 / 我的 / 社区 / 车控」分组；
 - **车况概览**：车型、SOC、续航、在线状态、OTA 版本、`vehiclePic3dUrl`；
 - **投屏资料**：从 `vehicleHomePageV2` 的 `encryptInfo` 取 key/iv/encryptValue，默认打码；
 - **OTA**：`checkVersion`、`ota/mmi/info/v2`（含 `fileUrl` + `sign`）、任务列表/记录/红点内容；
-- **壁纸与主题**：壁纸列表/数量/详情/适用车型；主题列表/详情（受 `themeShopFlag` 限制，当前车辆 40000）；
+- **车机壁纸**：壁纸列表/数量/详情/适用车型；**车机主题**按车型判断，只有 `themeShopFlag=1` 才显示主题组（AE5i 当前为 0，不显示）；
 - **自填凭据**：没有面板时，可在「设置」里填 App 3.0.6 的 appId/appSecret/Basic，
   或直接粘贴 token。appSecret 只放当前标签页的 sessionStorage（关页即失效），
   appId / token 存 localStorage；都不随仓库分发。

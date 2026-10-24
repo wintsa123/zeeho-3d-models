@@ -880,6 +880,8 @@ function renderNav() {
   const nav = $('endpoint-nav');
   nav.innerHTML = '';
   for (const group of GROUPS) {
+    // 主题商店按车型开放：只有 vehicleHomePageV2 的 themeShopFlag=1 才显示主题组（AE5i 为 0）。
+    if (group.id === 'theme' && state.themeSupported !== true) continue;
     const items = ENDPOINTS.filter((e) => e.group === group.id);
     if (!items.length) continue;
     const details = document.createElement('details');
@@ -1057,7 +1059,7 @@ function renderSummary(summary, meta) {
     ? `${escapeHtml(wallpaperSize)}<small>${summary.supportCustomWallpaper ? '自定义' : '固定'}</small>`
     : (summary.supportCustomWallpaper ? '支持自定义' : '—');
   setMetric('m-wallpaper', wallpaperText);
-  $('m-wallpaper').title = `主题商店：${summary.themeShopFlag === '1' ? '开' : '关'}${summary.themeShopNewFlag === '1' ? '（有新品）' : ''}`;
+  $('m-wallpaper').title = `主题商店：${summary.themeSupported ? '开放' : `该车型未开放${summary.name ? `（${summary.name}）` : ''}`}${summary.themeShopNewFlag === '1' ? '（有新品）' : ''}`;
   const pic3d = summary.pic3d;
   const pic3dUrl = safeHttpUrl(pic3d);
   $('m-3d').innerHTML = pic3dUrl
@@ -1161,6 +1163,10 @@ async function refreshHome() {
   const summary = pickVehicleSummary(result.data);
   state.uid = result.data?.data?.bindingUserId || state.uid;
   if (state.uid) localStorage.setItem(STORAGE.uid, state.uid);
+  state.themeSupported = Boolean(summary.themeSupported);
+  const wasTheme = state.endpoint?.group === 'theme';
+  renderNav();
+  if (wasTheme && !state.themeSupported) selectEndpoint('wallpaper_page');
   renderSummary(summary, `${result.elapsed} ms`);
 }
 
@@ -1383,6 +1389,7 @@ $('call-form').addEventListener('submit', async (event) => {
     state.last = { result, endpoint };
     state.tab = 'json';
   state.revealSensitive = false;
+  state.themeSupported = false;
     for (const tab of document.querySelectorAll('.tab')) tab.setAttribute('aria-selected', String(tab.dataset.tab === 'json'));
     renderResponse();
     if (result.response.status === 401) setStatus('bad', 'token 已失效，请重新登录');

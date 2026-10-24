@@ -741,6 +741,7 @@ export function pickVehicleSummary(home) {
     wallpaperWidth: Number(data.wallpaperResolutionWidth) || null,
     wallpaperHeight: Number(data.wallpaperResolutionHeight) || null,
     themeShopFlag: String(data.themeShopFlag ?? ''),
+    themeSupported: String(data.themeShopFlag ?? '') === '1',
     themeShopNewFlag: String(data.themeShopNewFlag ?? ''),
     appThemeRgb: data.appThemeRgb || '',
     appChargeRgb: data.appChargeRgb || '',
