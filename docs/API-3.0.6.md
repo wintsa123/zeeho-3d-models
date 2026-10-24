@@ -41,7 +41,7 @@
 | 文件 | 角色 |
 | --- | --- |
 | `sdk/zeeho-api.js` | **零依赖 SDK**：纯 JS SHA-1 / MD5、签名、`ZeehoClient`、便捷方法与 `pickVehicleSummary`。浏览器与 Node 通用，不依赖 DOM |
-| `sdk/endpoints.js` | 接口目录元数据（面板已用的 40 项 + 从 3.0.6 补充的端点），调试台表单与 CLI 共用 |
+| `sdk/endpoints.js` | 接口目录元数据（面板来源 39 项，其中 37 项有 panelId；另含 3.0.6 补充端点，共 57 项），调试台表单与 CLI 共用 |
 | `api.html` | **调试台**：分组端点列表、参数表单、JSON 响应、车况 / OTA 概览 |
 | `tools/zeeho-cli.mjs` | **CLI**：`login` / `vehicle` / `ota` / `watch` / `models` / `call` |
 
@@ -152,7 +152,8 @@ const result = await client.vehicleList();
 ```
 
 `ZeehoClient.request()` 返回**原始结果对象**，不抛业务异常：
-`{ status, ok, url, method, headers, text, data, code, message, elapsed, authFailed? }`，
+`{ status, ok, url, method, headers, requestHeaders, text, data, code, message, elapsed, authFailed? }`
+（`requestHeaders` 含 `Authorization`，不要原样写日志），
 `code !== '10000'` 需要调用方自己判断。
 
 ## 3. 网关行为与前端限制
@@ -384,9 +385,9 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 - **写操作会改真实世界**：`vehicleInfo/control`、`vehicleSet/network/unlock`、`vehicleSet/property*`、
   `dbpoint/send`、`commonArticle`、`Message/read|delete`、`integral/adjustByShare` 都属于写操作。调试台对它们标记「写」，
   必须勾选「我确认这是写操作」才发送；CLI 不会自动调用。
-- **本仓库是公开静态站**：页面、产物、构建脚本里都不写死 appSecret / Basic。`sdk/zeeho-api.js` 不内置密钥，
+- **本仓库是公开静态站**：本 PR 新增文件不写死 appSecret / Basic；`sdk/zeeho-api.js` 不内置密钥。既有 `index.html` 运行时暴露的 `ZEEHO_SIGN.APP_BASIC_AUTH` 属于历史产物，需另行处理，不在本 PR 范围。
   凭证由使用者注入；`api.html` 面板模式不落任何密钥。
-- 自填凭据模式会把 appId / appSecret 存进本机 `localStorage`（明文风险），仅限调试机使用，用完可「清空本地数据」。
+- 自填凭据模式的 appId 存 `localStorage`，appSecret 与 Basic 只放当前标签页 `sessionStorage`；仍有明文风险，仅限调试机使用，用完可「清空本机保存」。
 
 ## 8. 复现与工具
 
@@ -397,7 +398,7 @@ node --test tests/*.test.mjs
 ```
 
 覆盖：哈希与 Node `crypto` 对齐、RFC 3986 编码、query 规范化、签名 KAT、`buildHeaders` 头字段、
-`ZeehoClient` 的 URL/Bearer/Basic/401-XML 行为、`pickVehicleSummary`、端点目录自检。
+`ZeehoClient` 的 URL/Bearer/Basic/401-XML 行为、`pickVehicleSummary`、端点目录自检（14 条）。
 
 ### 8.2 CLI
 
@@ -407,6 +408,7 @@ node tools/zeeho-cli.mjs ota --vin {VIN}                            # 仪表 OTA
 node tools/zeeho-cli.mjs watch --vin {VIN} --every 600 --hours 2    # 轮询，发现新包即下载并打 sha256
 node tools/zeeho-cli.mjs login --phone {phone} [--code 123456]      # 登录，token 写入 ~/.zeeho_token.json
 node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点 id 或路径直接调
+# 写操作/发短信端点必须加 --yes；--json 默认打码敏感字段，--show-secrets 才输出原文
 ```
 
 ### 8.3 调试台 `api.html`
@@ -414,8 +416,8 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 - 默认 **复用面板签名**：在隐藏 iframe 里加载 `index.html`，调用面板的 `API.call` 与登录态，本页不保存密钥。
   注意面板签名是 `(tag, params, body, method)` 那一套，**preimage 与 3.0.6 的 `(url, method, body)` 不同**；
   直接拿 `ZEEHO_SIGN.buildHeaders(url, …)` 请求 `vehicleHomePageV2` 会被判 `30121`（实测），
-  面板没有的端点（OTA / 版本等）才退回自签名请求。
-- 设置里可切 **自填凭据**：填 appId / appSecret / Basic 或直接粘贴 token；appSecret 只放当前标签页 `sessionStorage`，appId / Basic 在 `localStorage`。
+  面板没有的端点（OTA / 版本等）优先用自填 appId/appSecret 自签名；没有 appSecret 时退回面板 signer（OTA / version 已实测可用，但不保证所有端点）。
+- 设置里可切 **自填凭据**：填 appId / appSecret / Basic 或直接粘贴 token；appId / token 在 `localStorage`，appSecret / Basic 只在当前标签页 `sessionStorage`。
 - 登录态优先读 `localStorage['zeeho.token']`：先在 `index.html` 登录一次，回到调试台刷新即可复用。
 - 写操作需勾选确认（见 §7）。
 

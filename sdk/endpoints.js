@@ -37,11 +37,11 @@ export const ENDPOINTS = [
     id: 'auth_code', group: 'auth', label: '发送短信验证码（3.0.6 无图形码）', method: 'GET',
     path: '/v1.0/mine/cfmotoservermine/authCode/{phone}',
     params: [{ in: 'path', key: 'phone', label: '手机号', example: '10000000000', required: true }],
-    auth: 'anonymous', source: 'app306',
+    auth: 'anonymous', source: 'app306', danger: true,
     note: '实测：手机号非法返回 3006CM0002001；有效手机号会直接发短信。仅 3.0.6 的 appId 有权限，面板 appId 会 30121 permit error。',
   },
   {
-    id: 'auth_login', panelId: 'auth_login', group: 'auth', label: '手机号 + 验证码换 token', method: 'POST',
+    id: 'auth_login', group: 'auth', label: '手机号 + 验证码换 token', method: 'POST',
     path: '/v1.0/mine/cfmotoservermine/user/loginByPhone',
     params: [], body: { phone: '10000000000', authCode: '123456' },
     auth: 'basic', source: 'panel',
@@ -56,7 +56,7 @@ export const ENDPOINTS = [
   {
     id: 'auth_sms_v2', group: 'auth', label: '登录：发短信验证码 V2', method: 'POST',
     path: '/v1.0/mine/cfmotoservermine/authCode/V2',
-    params: [], body: { phone: '10000000000', captcha: '1234', captchaId: '' }, auth: 'anonymous', source: 'panel',
+    params: [], body: { phone: '10000000000', captcha: '1234', captchaId: '' }, auth: 'anonymous', source: 'panel', danger: true,
     note: '需要先拿图形码；body 字段以 App 3.0.6 的登录页为准。',
   },
   {

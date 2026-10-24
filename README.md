@@ -17,7 +17,7 @@ vehicle-info.html       车辆信息页
 api.html                极核接口调试台（App 3.0.6 接口目录 + 车况/OTA）
 sdk/
   zeeho-api.js          零依赖接口 SDK（签名 / 客户端 / 便捷方法）
-  endpoints.js          接口目录元数据（面板 40 项 + 3.0.6 补充）
+  endpoints.js          接口目录元数据（面板 39 项 + 3.0.6 补充，共 57 项）
 tools/zeeho-cli.mjs     命令行：登录 / 车况 / OTA 固件 / 车模导入
 docs/API-3.0.6.md       接口文档（签名、端点、错误码、坑位）
 tests/api.test.mjs      签名与客户端离线测试
@@ -55,14 +55,14 @@ app/
   `ZEEHO_SIGN` / `API.call`，面板模式不保存任何密钥；
 - **登录态复用**：读取 `localStorage['zeeho.token']`。先在面板用手机号登录一次，
   回到调试台刷新即可；也可以手动粘贴 token；
-- **接口目录**：面板已有的 40 个端点 + 从 App 3.0.6 补的 OTA / 版本 / 蓝牙能力码等，
+- **接口目录**：面板来源的 39 个端点 + 从 App 3.0.6 补的 OTA / 版本 / 蓝牙能力码等（共 57 个），
   按「登录 / 车辆 / 骑行 / OTA / 消息 / 我的 / 社区 / 车控」分组；
 - **车况概览**：车型、SOC、续航、在线状态、OTA 版本、`vehiclePic3dUrl`；
 - **投屏资料**：从 `vehicleHomePageV2` 的 `encryptInfo` 取 key/iv/encryptValue，默认打码；
 - **OTA**：`checkVersion`、`ota/mmi/info/v2`（含 `fileUrl` + `sign`）、任务列表/记录/红点内容；
 - **自填凭据**：没有面板时，可在「设置」里填 App 3.0.6 的 appId/appSecret/Basic，
   或直接粘贴 token。appSecret 只放当前标签页的 sessionStorage（关页即失效），
-  appId / Basic 存 localStorage；都不随仓库分发。
+  appId / token 存 localStorage；都不随仓库分发。
 
 接口细节、签名算法、错误码与两个网关坑（UA / Content-Type）见
 [docs/API-3.0.6.md](docs/API-3.0.6.md)。
@@ -83,7 +83,7 @@ node tools/zeeho-cli.mjs watch --vin TESTVIN0000000001 --every 600 --hours 2
 # 从 vehiclePic3dUrl 导入官方 3D 车模（自动更新 index.json）
 node tools/zeeho-cli.mjs models --vin TESTVIN0000000001 --out models
 
-# 任意接口（--json 默认打码 encryptInfo / location / wifi 密码；需要原值加 --show-secrets）
+# 任意接口（--json 默认打码 encryptInfo / location / wifi 密码 / OTA fileUrl；需要原值加 --show-secrets）
 node tools/zeeho-cli.mjs call ota_info --query vinNo=TESTVIN0000000001 --json
 ```
 

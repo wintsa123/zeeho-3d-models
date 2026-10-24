@@ -80,7 +80,40 @@ function requireCredentials(config) {
 
 function printJson(value) {
   console.log(JSON.stringify(value, null, 2));
+}function maskUrl(value) {
+  const text = String(value || '');
+  try {
+    const url = new URL(text);
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(sign|signature|token|pwd|expires|ossaccesskeyid|security-token)$/i.test(key)) {
+        url.searchParams.set(key, '***');
+      }
+    }
+    return url.toString();
+  } catch {
+    return text.replace(/(^|[?&])(sign|signature|token|pwd|password|expires|ossaccesskeyid)=[^&]*/gi, '$1$2=***');
+  }
 }
+
+function redactSensitive(value, showSecrets = false) {
+  if (showSecrets || value == null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map((item) => redactSensitive(item, false));
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'encryptInfo' && child && typeof child === 'object') {
+      out[key] = { present: true, keys: Object.keys(child) };
+    } else if (key === 'location' && child && typeof child === 'object') {
+      out[key] = { present: true };
+    } else if (typeof child === 'string' && /(?:[?&](?:pwd|password|token|sign|signature|expires|ossaccesskeyid)=)/i.test(child)) {
+      out[key] = maskUrl(child);
+    } else {
+      out[key] = redactSensitive(child, false);
+    }
+  }
+  return out;
+}
+
+
 
 function unwrap(result) {
   if (!result.data) {
@@ -156,21 +189,8 @@ async function cmdVehicle(options, config) {
   }
   const summary = pickVehicleSummary(data);
   if (options.json) {
-    const showSecrets = Boolean(options['show-secrets']);
-    const safe = {
-      ...summary,
-      // encryptInfo 是投屏加密资料、location 是车辆位置、wifiAddress 含 Wi-Fi 密码：
-      // 默认只报告“有没有”，需要原值请加 --show-secrets。
-      encryptInfo: summary.encryptInfo
-        ? (showSecrets ? summary.encryptInfo : { present: true, keys: Object.keys(summary.encryptInfo) })
-        : null,
-      location: summary.location && !showSecrets ? { present: true } : summary.location,
-      wifiAddress: summary.wifiAddress && !showSecrets
-        ? String(summary.wifiAddress).replace(/([?&]pwd=)[^&]*/i, '$1***')
-        : summary.wifiAddress,
-    };
     if (!summary.name) summary.name = vehicles[0]?.vehicleName || '';
-    return printJson({ vehicles, summary: safe });
+    return printJson(redactSensitive({ vehicles, summary }, Boolean(options['show-secrets'])));
   }
   console.log(`\n车况（${summary.name} · ${summary.typeName}）：`);
   console.log(`  在线状态   ${summary.online || '—'}`);
@@ -199,13 +219,10 @@ async function cmdOta(options, config) {
   if (!data) return;
   const file = data.fileInfo || {};
   if (options.json) {
-    const info = {
-      ...data,
-      wifiAddress: data.wifiAddress && !options['show-secrets']
-        ? String(data.wifiAddress).replace(/([?&]pwd=)[^&]*/i, '$1***')
-        : data.wifiAddress,
-    };
-    return printJson({ info, records: records.data?.data, content: content.data?.data });
+    return printJson(redactSensitive(
+      { info: data, records: records.data?.data, content: content.data?.data },
+      Boolean(options['show-secrets']),
+    ));
   }
 
   console.log(`仪表 OTA（${vin}）`);
@@ -214,10 +231,10 @@ async function cmdOta(options, config) {
   console.log(`  appVersion      ${data.appVersion || '—'}`);
   console.log(`  recordId        ${data.recordId || '—'}`);
   console.log(`  otaVersion      ${data.otaVersion || '—'}`);
-  if (data.wifiAddress) console.log(`  wifiAddress     ${String(data.wifiAddress).replace(/([?&]pwd=)[^&]*/i, '$1***')}`);
+  if (data.wifiAddress) console.log(`  wifiAddress     ${maskUrl(data.wifiAddress)}`);
   if (file.fileUrl) {
     console.log(`  file            ${file.fileName || '?'}  ${file.fileSize || '?'} bytes  firmwareId=${file.firmwareId || '?'}`);
-    console.log(`  fileUrl         ${file.fileUrl}`);
+    console.log(`  fileUrl         ${options['show-secrets'] ? file.fileUrl : maskUrl(file.fileUrl)}`);
     if (options.download) {
       const saved = await download(file.fileUrl, path.resolve(options.download), file.fileName || `${vin}.bin`);
       console.log(`  ✓ 已下载 ${saved}`);
@@ -236,8 +253,10 @@ async function cmdWatch(options, config) {
   if (!client.token) return fail('缺少 token：先 login，或设置 ZEEHO_TOKEN');
   const vin = options.vin;
   if (!vin) return fail('--vin 必填');
-  const every = Math.max(30, Number(options.every || 600));
-  const hours = Number(options.hours || 2);
+  const everyRaw = Number(options.every || 600);
+  const hoursRaw = Number(options.hours || 2);
+  const every = Number.isFinite(everyRaw) ? Math.max(30, everyRaw) : 600;
+  const hours = Number.isFinite(hoursRaw) ? Math.max(0.1, hoursRaw) : 2;
   const deadline = Date.now() + (options.once ? 0 : hours * 3600 * 1000);
 
   while (true) {
@@ -265,7 +284,11 @@ async function download(url, directory, fileName) {
   const target = path.join(directory, path.basename(fileName || 'firmware.bin'));
   const response = await fetch(url, { headers: { 'User-Agent': 'okhttp/4.9.2' } });
   if (!response.ok) throw new Error(`下载失败 HTTP ${response.status}`);
+  const maxBytes = 512 * 1024 * 1024;
+  const contentLength = Number(response.headers.get('content-length') || 0);
+  if (contentLength > maxBytes) throw new Error(`文件过大：${contentLength} bytes（上限 512MB）`);
   const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxBytes) throw new Error(`文件过大：${buffer.length} bytes（上限 512MB）`);
   fs.writeFileSync(target, buffer);
   const hash = crypto.createHash('sha256').update(buffer).digest('hex');
   console.log(`    sha256 ${hash}`);
@@ -321,11 +344,16 @@ async function cmdModels(options, config) {
 
 async function cmdCall(options, config) {
   const client = makeClient(config);
-  if (!client.token) return fail('缺少 token：先 login，或设置 ZEEHO_TOKEN');
   const target = options.target;
   if (!target) return fail('用法：call <接口 id | 路径> [--query k=v ...] [--body JSON]');
 
   const endpoint = byId(target);
+  if (endpoint?.danger && !options.yes) {
+    return fail(`这是写操作/发短信端点（${endpoint.id}），确认后加 --yes 再执行`);
+  }
+  if (endpoint?.auth !== 'anonymous' && !client.token) {
+    return fail('缺少 token：先 login，或设置 ZEEHO_TOKEN');
+  }
   const query = { ...(options.query || {}) };
   const values = { ...query };
   const method = (options.method || endpoint?.method || 'GET').toUpperCase();
@@ -337,9 +365,18 @@ async function cmdCall(options, config) {
     }
     requestPath = fillPath(requestPath, values);
   }
+  // path 参数已经填进 URL，不要再作为 query 重复发送。
+  if (endpoint) {
+    for (const param of endpoint.params || []) {
+      if (param.in === 'path') delete query[param.key];
+    }
+  }
   const body = options.body ? JSON.parse(options.body) : undefined;
   const result = await client.request({ path: requestPath, method, query, body, token: client.token });
-  if (options.json) return printJson(result.data ?? { status: result.status, text: result.text });
+  if (options.json) {
+    const payload = result.data ?? { status: result.status, text: result.text };
+    return printJson(redactSensitive(payload, Boolean(options['show-secrets'])));
+  }
   if (result.data) {
     console.log(`HTTP ${result.status} · code ${result.data.code} · ${result.data.message}`);
     printJson(result.data);
@@ -362,9 +399,9 @@ const HELP = `极核接口 CLI
   ota      --vin <VIN> [--download <目录>] [--json]   仪表 OTA 信息 / 固件包 / 历史
   watch    --vin <VIN> [--every 600] [--hours 2] [--once] [--download <目录>]
   models   [--vin <VIN> | --url <glb 地址>] [--name/--title/--note] [--out models]
-  call     <接口 id | 路径> [--query k=v ...] [--body JSON] [--method GET] [--json]
+  call     <接口 id | 路径> [--query k=v ...] [--body JSON] [--method GET] [--json] [--yes]
 
-  --show-secrets  在 --json 输出里保留 encryptInfo / wifiAddress 密码原文（默认打码）
+  --show-secrets  保留 encryptInfo / location / wifi 密码 / OTA fileUrl 原文（默认打码）
 
 凭据（环境变量或未跟踪的 config.local.json）：
   ZEEHO_BASE  ZEEHO_APP_ID  ZEEHO_APP_SECRET  ZEEHO_BASIC  ZEEHO_TOKEN
@@ -392,6 +429,7 @@ async function main() {
       body: { type: 'string' },
       method: { type: 'string' },
       json: { type: 'boolean' },
+      yes: { type: 'boolean' },
       'show-secrets': { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
     },

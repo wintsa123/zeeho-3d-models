@@ -328,6 +328,7 @@
               <button class="tab" role="tab" aria-selected="false" data-tab="request">请求</button>
               <button class="tab" role="tab" aria-selected="false" data-tab="curl">cURL</button>
             </div>
+            <button class="btn small" id="btn-reveal" type="button">显示原文</button>
             <button class="btn small" id="btn-copy" type="button">复制</button>
           </div>
         </div>
@@ -371,7 +372,7 @@
         </label>
         <label class="radio-card">
           <input type="radio" name="mode" value="own">
-          <span><b>自填凭据</b><span>填入 App 3.0.6 的 appId / appSecret / Basic。appSecret 只放当前标签页的 sessionStorage，关页即失效。</span></span>
+          <span><b>自填凭据</b><span>填入 App 3.0.6 的 appId / appSecret / Basic。appSecret 与 Basic 只放当前标签页的 sessionStorage，关页即失效。</span></span>
         </label>
       </div>
     </div>
@@ -380,7 +381,7 @@
       <div class="field"><label for="cfg-base">BASE</label><input id="cfg-base" placeholder="https://tapi.zeehoev.com"></div>
       <div class="field"><label for="cfg-appid">appId</label><input id="cfg-appid" placeholder="App 3.0.6 AppConfig"></div>
       <div class="field"><label for="cfg-secret">appSecret</label><input id="cfg-secret" type="password" placeholder="不随仓库分发"></div>
-      <div class="field"><label for="cfg-basic">Basic</label><input id="cfg-basic" placeholder="Basic …（登录接口用）"></div>
+      <div class="field"><label for="cfg-basic">Basic</label><input id="cfg-basic" type="password" placeholder="Basic …（登录接口用）"></div>
       <div class="field" style="grid-column:1/-1">
         <label for="cfg-token">Bearer token</label>
         <input id="cfg-token" placeholder="面板登录后自动读取；也可从 App 抓包粘贴">
@@ -391,7 +392,7 @@
     <div class="form-grid">
       <div class="field" style="grid-column:1/-1">
         <label for="cfg-basic-global">登录 Basic</label>
-        <input id="cfg-basic-global" placeholder="登录接口需要；面板模式下自动从 ZEEHO_SIGN.APP_BASIC_AUTH 读取">
+        <input id="cfg-basic-global" type="password" placeholder="登录接口需要；面板模式下自动从 ZEEHO_SIGN.APP_BASIC_AUTH 读取">
       </div>
     </div>
 
@@ -419,7 +420,7 @@
 </dialog>
 
 <script type="module">
-import { ZeehoClient, buildHeaders, pickVehicleSummary, DEFAULT_BASE } from './sdk/zeeho-api.js';
+import { ZeehoClient, buildHeaders, pickVehicleSummary, rfc3986, DEFAULT_BASE } from './sdk/zeeho-api.js';
 import { GROUPS, ENDPOINTS, fillPath, byId } from './sdk/endpoints.js';
 
 const $ = (id) => document.getElementById(id);
@@ -430,6 +431,7 @@ const STORAGE = {
   mode: 'zeeho.api.mode',
   values: 'zeeho.api.values',
   secret: 'zeeho.api.secret',
+  basic: 'zeeho.api.basic',
   theme: 'zeeho.api.theme',
   vin: 'zeeho.api.vin',
   uid: 'zeeho.api.uid',
@@ -501,6 +503,55 @@ function safeHttpUrl(value) {
   return /^https?:\/\//i.test(url) ? url : '';
 }
 
+function maskSensitiveUrl(value) {
+  const text = String(value || '');
+  try {
+    const url = new URL(text);
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(sign|signature|token|pwd|password|expires|ossaccesskeyid|security-token)$/i.test(key)) {
+        url.searchParams.set(key, '***');
+      }
+    }
+    return url.toString();
+  } catch {
+    return text.replace(/(^|[?&])(pwd|password|token|sign|signature|expires|ossaccesskeyid)=[^&]*/gi, '$1$2=***');
+  }
+}
+
+function redactForDisplay(value) {
+  if (value == null || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(redactForDisplay);
+  const out = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'encryptInfo' && child && typeof child === 'object') {
+      out[key] = { present: true, keys: Object.keys(child) };
+    } else if (key === 'location' && child && typeof child === 'object') {
+      out[key] = { present: true };
+    } else if (typeof child === 'string' && /(?:[?&](?:pwd|password|token|sign|signature|expires|ossaccesskeyid)=)/i.test(child)) {
+      out[key] = maskSensitiveUrl(child);
+    } else if (['authCode', 'password', 'phone'].includes(key) && typeof child === 'string') {
+      out[key] = '***';
+    } else {
+      out[key] = redactForDisplay(child);
+    }
+  }
+  return out;
+}
+
+function redactedHeaders(headers) {
+  const copy = { ...(headers || {}) };
+  for (const key of Object.keys(copy)) {
+    if (/^(authorization|proxy-authorization|cookie)$/i.test(key)) {
+      copy[key] = /^Basic\s/i.test(String(copy[key])) ? 'Basic <REDACTED>' : 'Bearer <REDACTED>';
+    }
+  }
+  return copy;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
 function fmtTime(iso) {
   if (!iso) return '';
   return String(iso).replace('T', ' ').replace(/\..*$/, '');
@@ -527,14 +578,37 @@ function setStatus(stateName, text) {
   $('state-text').textContent = text;
 }
 
+function scrubValues(values) {
+  const out = {};
+  for (const [id, map] of Object.entries(values || {})) {
+    const copy = { ...(map || {}) };
+    for (const key of ['phone', 'authCode', 'captcha', 'code']) delete copy[key];
+    if (typeof copy.__body === 'string') {
+      try {
+        const parsed = JSON.parse(copy.__body);
+        for (const key of ['phone', 'authCode', 'captcha', 'code', 'password']) delete parsed[key];
+        copy.__body = JSON.stringify(parsed);
+      } catch { /* 非 JSON 原样 */ }
+    }
+    out[id] = copy;
+  }
+  return out;
+}
+
+function persistValues() {
+  saveJson(STORAGE.values, scrubValues(state.values));
+}
+
 function loadSettings() {
   state.mode = localStorage.getItem(STORAGE.mode) || 'panel';
   // appSecret 比 appId 敏感：只放 sessionStorage（关标签页即失效），不落 localStorage。
   const stored = loadJson(STORAGE.cfg, {});
   delete stored.appSecret;
+  delete stored.basic;
   state.cfg = { base: DEFAULT_BASE, appId: '', appSecret: '', basic: '', ...stored };
   try { state.cfg.appSecret = sessionStorage.getItem(STORAGE.secret) || ''; } catch { state.cfg.appSecret = ''; }
-  state.values = loadJson(STORAGE.values, {});
+  try { state.cfg.basic = sessionStorage.getItem(STORAGE.basic) || ''; } catch { state.cfg.basic = ''; }
+  state.values = scrubValues(loadJson(STORAGE.values, {}));
   state.token = localStorage.getItem(STORAGE.token) || '';
   state.vin = localStorage.getItem(STORAGE.vin) || '';
   state.uid = localStorage.getItem(STORAGE.uid) || '';
@@ -542,10 +616,12 @@ function loadSettings() {
 
 function persistSettings() {
   localStorage.setItem(STORAGE.mode, state.mode);
-  saveJson(STORAGE.cfg, { base: state.cfg.base, appId: state.cfg.appId, basic: state.cfg.basic });
+  saveJson(STORAGE.cfg, { base: state.cfg.base, appId: state.cfg.appId });
   try {
     if (state.cfg.appSecret) sessionStorage.setItem(STORAGE.secret, state.cfg.appSecret);
     else sessionStorage.removeItem(STORAGE.secret);
+    if (state.cfg.basic) sessionStorage.setItem(STORAGE.basic, state.cfg.basic);
+    else sessionStorage.removeItem(STORAGE.basic);
   } catch { /* 隐私模式 */ }
 }
 
@@ -553,6 +629,10 @@ function getBasic() {
   if (state.cfg.basic) return state.cfg.basic;
   const panelBasic = state.panelWin?.ZEEHO_SIGN?.APP_BASIC_AUTH;
   return panelBasic || '';
+}
+
+function hasOwnCredentials() {
+  return Boolean(state.cfg.appId && state.cfg.appSecret);
 }
 
 function getBase() {
@@ -581,10 +661,15 @@ async function loadPanel(timeoutMs = 9000) {
         state.panelWin = win;
         // 面板 API 可能已经加载了 token；localStorage 是同一份，优先读它。
         // localStorage 是面板与调试台共享的登录态，优先于 API 内部可能仍是 demo 的 token。
-        const panelToken = win.localStorage?.getItem('zeeho.token') || win.API?.token || '';
+        const apiToken = String(win.API?.token || '');
+        const storedToken = win.localStorage?.getItem('zeeho.token') || '';
+        // 面板 API.token 是刚登录的最新值；如果它是 UUID 就优先，避免 localStorage 旧值反而覆盖。
+        const panelToken = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(apiToken)
+          ? apiToken
+          : (storedToken || apiToken);
         if (panelToken && panelToken !== state.token) {
           state.token = panelToken;
-          localStorage.setItem(STORAGE.token, panelToken);
+          try { localStorage.setItem(STORAGE.token, panelToken); } catch { /* 隐私模式 */ }
         }
         return true;
       }
@@ -594,12 +679,28 @@ async function loadPanel(timeoutMs = 9000) {
   return false;
 }
 
+function panelQueryParams(url) {
+  const params = {};
+  for (const [key, value] of new URL(url).searchParams) {
+    if (params[key] === undefined) params[key] = value;
+    else if (Array.isArray(params[key])) params[key].push(value);
+    else params[key] = [params[key], value];
+  }
+  return params;
+}
+
 function panelHeaders(url, method, bodyText) {
   const sign = state.panelWin?.ZEEHO_SIGN;
   if (!sign?.sign) throw new Error('面板签名未就绪');
-  // 注意 ZEEHO_SIGN.buildHeaders 的参数是 (tag, params, body, method)，不是 (url,…)。
-  // 这里要签的是「任意 URL」，用 sign(url, method, body) 才是对的。
-  const signed = sign.sign(url, String(method).toUpperCase(), bodyText || '');
+  // ZEEHO_SIGN.sign 的真实签名是 (tagOrUrl, params, body, method)：
+  //   · params 会经 toQuery() 变成 query（面板签名对非 h5 是 query + body）；
+  //   · 不能把 method 当第二个参数传，否则 query 会丢，POST 的 body 也会错位。
+  const signed = sign.sign(
+    url,
+    panelQueryParams(url),
+    bodyText || '',
+    String(method).toUpperCase(),
+  );
   return {
     'Content-Type': 'application/json;charset=UTF-8',
     'Accept-Language': 'zh-CN',
@@ -612,13 +713,16 @@ function panelHeaders(url, method, bodyText) {
 
 function ownHeaders(url, method, bodyText) {
   if (!state.cfg.appId || !state.cfg.appSecret) throw new Error('自填模式需要 appId 与 appSecret');
+  // nonce 尾部与 timestamp 必须是同一毫秒；不能各取一次 Date.now()。
+  const timestamp = Date.now();
   return buildHeaders({
     url,
     method,
     body: bodyText,
     appId: state.cfg.appId,
     appSecret: state.cfg.appSecret,
-    nonce: `${randomNonce()}${Date.now()}`,
+    nonce: `${randomNonce()}${timestamp}`,
+    timestamp,
   });
 }
 
@@ -635,9 +739,9 @@ function buildUrl(path, params, values) {
     pairs.push([param.key, value]);
   }
   if (pairs.length) {
-    const query = new URLSearchParams();
-    for (const [k, v] of pairs) query.append(k, v);
-    url += (url.includes('?') ? '&' : '?') + query.toString();
+    // 与签名侧 canonicalQuery 一致：空格 %20，~ 保留；不能直接用 URLSearchParams（空格变 +）。
+    const query = pairs.map(([k, v]) => `${rfc3986(k)}=${rfc3986(v)}`).join('&');
+    url += (url.includes('?') ? '&' : '?') + query;
   }
   return url;
 }
@@ -648,14 +752,20 @@ function panelParams(values) {
   if (params.vin == null && params.vinNo) params.vin = params.vinNo;
   if (params.vinNo == null && params.vin) params.vinNo = params.vin;
   if (params.carUid == null && params.carUserId) params.carUid = params.carUserId;
+  if (params.carUserId == null && params.carUid) params.carUserId = params.carUid;
   if (params.uid == null && params.userId) params.uid = params.userId;
+  if (params.userId == null && params.uid) params.userId = params.uid;
   if (params.uid == null && state.uid) params.uid = state.uid;
-  if (params.authCode && !params.code) params.code = params.authCode;
+  if (params.postId == null && params.articleId) params.postId = params.articleId;
   if (params.month) {
     params.month_dot = String(params.month).replace('-', '.');
     params.month_dash = String(params.month).replace('.', '-');
   }
-  if (!params.date_dash) params.date_dash = '';
+  if (params.startDate) {
+    params.date_dash = String(params.startDate).replace(/-/g, '.');
+    params.month_dash = String(params.startDate).slice(0, 7).replace('-', '.');
+  }
+  if (params.startDateTime == null && params.startDate) params.startDateTime = params.startDate;
   return params;
 }
 
@@ -677,16 +787,18 @@ async function panelCall(endpoint, values, token, body) {
   if (api.authFailed) { try { api.clearAuthFail?.(); } catch { /* 旧版本没有 */ } }
   try { await api.setSource?.('direct'); } catch { /* 旧版本没有 setSource */ }
   if (finalToken) api.token = finalToken;
-  const params = { ...panelParams(values), ...(body && typeof body === 'object' && !Array.isArray(body) ? body : {}) };
-  if (params.authCode && !params.code) params.code = params.authCode;
+  const callParams = panelParams(values);
+  const callOptions = {};
+  if (body !== undefined && body !== null) callOptions.body = body;
+  if (endpoint.method) callOptions.method = endpoint.method;
   const started = performance.now();
-  let result = await api.call(endpoint.panelId, params, {});
+  let result = await api.call(endpoint.panelId, callParams, callOptions);
   // 面板偶尔会因为并发/限流把一次 401 记成「登录态已失效」并熔断后续请求。
   // 清一次失败标记再重试一次；token 真的失效时第二次仍会失败，不会掩盖问题。
   if (!result?.ok && /401|登录态已失效/.test(String(result?.message || ''))) {
     try { api.clearAuthFail?.(); } catch { /* 旧版本没有 */ }
     await sleep(400);
-    result = await api.call(endpoint.panelId, params, {});
+    result = await api.call(endpoint.panelId, callParams, callOptions);
   }
   const elapsed = Math.round(performance.now() - started);
   const raw = result?.raw ?? { code: result?.code ?? '', message: result?.message ?? '', data: result?.data ?? null };
@@ -715,13 +827,16 @@ async function request({ endpoint, values, body, token }) {
   const url = buildUrl(endpoint.path, endpoint.params, values);
   const method = endpoint.method || 'GET';
   const bodyText = body == null ? '' : JSON.stringify(body);
+  // 面板 signer 的 preimage 只有 toQuery(params)+body，不含 scheme://host/path。
+  // 有 3.0.6 appId/appSecret 时优先自签名（完整 URL）；没有才退回面板签名。
+  const useOwnSign = state.mode !== 'panel' || hasOwnCredentials();
   let headers;
-  if (state.mode === 'panel') {
+  if (useOwnSign) {
+    headers = ownHeaders(url, method, bodyText);
+  } else {
     const ready = await loadPanel();
     if (!ready) throw new Error('面板签名加载失败：请刷新本页，或在设置里改用「自填凭据」');
     headers = panelHeaders(url, method, bodyText);
-  } else {
-    headers = ownHeaders(url, method, bodyText);
   }
   if (endpoint.auth === 'token') {
     const finalToken = token ?? state.token;
@@ -747,11 +862,10 @@ async function request({ endpoint, values, body, token }) {
 }
 
 function curlFor({ url, method, headers, body }) {
-  const safeHeaders = { ...headers };
-  if (safeHeaders.Authorization) safeHeaders.Authorization = 'Bearer <TOKEN>';
-  const lines = [`curl -sS -X ${method} '${url}'`];
-  for (const [k, v] of Object.entries(safeHeaders)) lines.push(`  -H '${k}: ${v}'`);
-  if (body) lines.push(`  --data '${body.replace(/'/g, "'\\''")}'`);
+  const safeHeaders = redactedHeaders(headers);
+  const lines = [`curl -sS -X ${method} ${shellQuote(url)}`];
+  for (const [k, v] of Object.entries(safeHeaders)) lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
+  if (body) lines.push(`  --data ${shellQuote(body)}`);
   return lines.join(' \\\n');
 }
 
@@ -844,7 +958,7 @@ function selectEndpoint(id) {
     input.placeholder = param.example || '';
     input.addEventListener('input', () => {
       values[param.key] = input.value;
-      saveJson(STORAGE.values, state.values);
+      persistValues();
     });
     field.append(label, input);
     fields.appendChild(field);
@@ -860,7 +974,7 @@ function selectEndpoint(id) {
     $('body-input').value = stored !== undefined ? stored : JSON.stringify(endpoint.body, null, 2);
     $('body-input').oninput = () => {
       values.__body = $('body-input').value;
-      saveJson(STORAGE.values, state.values);
+      persistValues();
     };
   }
   renderResponse();
@@ -871,6 +985,8 @@ function selectEndpoint(id) {
 function renderResponse() {
   const box = $('resp-box');
   const last = state.last;
+  $('btn-reveal').classList.toggle('hidden', !last?.result?.data);
+  $('btn-reveal').textContent = state.revealSensitive ? '隐藏原文' : '显示原文';
   if (!last) {
     box.innerHTML = '<div class="empty">执行一个接口后，这里显示响应。</div>';
     $('r-status').textContent = '尚未请求';
@@ -886,11 +1002,15 @@ function renderResponse() {
   $('r-meta').textContent = `${endpoint.label} · ${elapsed} ms${data?.message ? ` · ${data.message}` : ''}`;
 
   if (state.tab === 'request') {
+    let requestBody = result.body || null;
+    if (requestBody && !state.revealSensitive) {
+      try { requestBody = JSON.stringify(redactForDisplay(JSON.parse(requestBody))); } catch { /* 非 JSON 原样 */ }
+    }
     box.innerHTML = `<pre>${highlightJson(JSON.stringify({
       url: result.url,
       method: result.method,
-      headers: result.headers,
-      body: result.body || null,
+      headers: redactedHeaders(result.headers),
+      body: requestBody,
     }, null, 2))}</pre>`;
     return;
   }
@@ -898,8 +1018,9 @@ function renderResponse() {
     box.innerHTML = `<pre>${escapeHtml(curlFor(result))}</pre>`;
     return;
   }
-  const pretty = data ? JSON.stringify(data, null, 2) : text;
-  box.innerHTML = `<pre>${data ? highlightJson(pretty) : escapeHtml(pretty)}</pre>`;
+  const displayData = data && !state.revealSensitive ? redactForDisplay(data) : data;
+  const pretty = displayData ? JSON.stringify(displayData, null, 2) : text;
+  box.innerHTML = `<pre>${displayData ? highlightJson(pretty) : escapeHtml(pretty)}</pre>`;
   const fileUrl = safeHttpUrl(data?.data?.fileInfo?.fileUrl);
   if (fileUrl) {
     const bar = document.createElement('div');
@@ -922,7 +1043,7 @@ function renderSummary(summary, meta) {
   $('summary-sub').textContent = [summary.name, summary.typeName].filter(Boolean).join(' · ') || '已读取';
   setMetric('m-state', summary.online === 'ONLINE' ? '<span class="status-ok">在线</span>' : escapeHtml(summary.online || '—'));
   setMetric('m-soc', summary.soc == null ? '—' : `${summary.soc}<small>%</small>`);
-  setMetric('m-range', summary.rangeKm == null ? '—' : `${summary.rangeKm}<small>km</small>`);
+  setMetric('m-range', summary.rangeKm == null ? '—' : `${escapeHtml(summary.rangeKm)}<small>km</small>`);
   setMetric('m-ota', escapeHtml(summary.otaVersion || '—'));
   const pic3d = summary.pic3d;
   const pic3dUrl = safeHttpUrl(pic3d);
@@ -1111,6 +1232,10 @@ for (const radio of document.querySelectorAll('input[name="mode"]')) {
   });
 }
 
+for (const [a, b] of [['cfg-basic', 'cfg-basic-global'], ['cfg-basic-global', 'cfg-basic']]) {
+  $(a).addEventListener('input', () => { $(b).value = $(a).value; });
+}
+
 $('btn-save-cfg').addEventListener('click', async () => {
   state.mode = document.querySelector('input[name="mode"]:checked').value;
   state.cfg = {
@@ -1147,10 +1272,14 @@ $('btn-load-panel').addEventListener('click', async () => {
 
 $('btn-clear').addEventListener('click', () => {
   for (const key of Object.values(STORAGE)) localStorage.removeItem(key);
-  try { sessionStorage.removeItem(STORAGE.secret); } catch { /* 隐私模式 */ }
+  try { sessionStorage.removeItem(STORAGE.secret); sessionStorage.removeItem(STORAGE.basic); } catch { /* 隐私模式 */ }
   state.token = '';
   state.cfg = { base: DEFAULT_BASE, appId: '', appSecret: '', basic: '' };
   state.mode = 'panel';
+  state.values = {};
+  state.home = null;
+  state.last = null;
+  renderResponse();
   state.vehicles = [];
   state.vin = '';
   state.uid = '';
@@ -1197,6 +1326,11 @@ for (const tab of document.querySelectorAll('.tab')) {
   });
 }
 
+$('btn-reveal').addEventListener('click', () => {
+  state.revealSensitive = !state.revealSensitive;
+  renderResponse();
+});
+
 $('btn-copy').addEventListener('click', async () => {
   if (!state.last) return toast('还没有响应');
   const { result, endpoint } = state.last;
@@ -1235,6 +1369,7 @@ $('call-form').addEventListener('submit', async (event) => {
     const result = await request({ endpoint, values, body, token: state.token });
     state.last = { result, endpoint };
     state.tab = 'json';
+  state.revealSensitive = false;
     for (const tab of document.querySelectorAll('.tab')) tab.setAttribute('aria-selected', String(tab.dataset.tab === 'json'));
     renderResponse();
     if (result.response.status === 401) setStatus('bad', 'token 已失效，请重新登录');

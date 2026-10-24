@@ -137,7 +137,7 @@ test('ZeehoClient：URL/query 拼接、Bearer/Basic、JSON 解析', async () => 
     query: { vinNo: 'VIN 1', sensorType: 'EXTERNAL' },
     token: 'tok',
   });
-  assert.equal(calls[0].url, 'https://example.test/v1.0/app/cfmotoserverapp/tire/monitoring?vinNo=VIN+1&sensorType=EXTERNAL');
+  assert.equal(calls[0].url, 'https://example.test/v1.0/app/cfmotoserverapp/tire/monitoring?vinNo=VIN%201&sensorType=EXTERNAL');
   assert.equal(calls[0].init.headers.Authorization, 'Bearer tok');
   assert.equal(calls[0].init.headers['Cfmoto-X-Sign-Type'], '0');
   assert.equal(result.data.data.url, calls[0].url);
@@ -148,6 +148,21 @@ test('ZeehoClient：URL/query 拼接、Bearer/Basic、JSON 解析', async () => 
   assert.equal(loginCall.init.method, 'POST');
   assert.equal(loginCall.init.headers.Authorization, 'Basic abc');
   assert.equal(loginCall.init.body, '{"phone":"10000000000","authCode":"123456"}');
+});
+
+test('ZeehoClient.url：query 与签名共用 RFC3986 编码', () => {
+  const client = new ZeehoClient({ fetchImpl: async () => new Response('{}') });
+  assert.equal(
+    client.url('/v1.0/x', { q: 'a b~!', empty: '' }),
+    'https://tapi.zeehoev.com/v1.0/x?q=a%20b~%21&empty=',
+  );
+});
+
+test('pickVehicleSummary：空 SOC / 字符串布尔值不被误判', () => {
+  const summary = pickVehicleSummary({ data: { bmssoc: '', hmiRidableMile: '', whetherChargeState: '0' } });
+  assert.equal(summary.soc, null);
+  assert.equal(summary.rangeKm, null);
+  assert.equal(summary.charging, false);
 });
 
 test('ZeehoClient：非 JSON（网关 XML 401）也能返回而不抛异常', async () => {

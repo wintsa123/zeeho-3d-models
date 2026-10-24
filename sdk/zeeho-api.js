@@ -228,7 +228,7 @@ export function canonicalQuery(query) {
     if (left[1] !== right[1]) return left[1] < right[1] ? -1 : 1;
     return 0;
   });
-  return pairs.map(([k, v]) => `${k}=${rfc3986(v)}`).join('&');
+  return pairs.map(([k, v]) => `${rfc3986(k)}=${rfc3986(v)}`).join('&');
 }
 
 /**
@@ -344,15 +344,18 @@ export class ZeehoClient {
   url(path, query) {
     let absolute = /^https?:\/\//i.test(path) ? path : `${this.base}${path.startsWith('/') ? '' : '/'}${path}`;
     if (query) {
-      const params = query instanceof URLSearchParams ? query : new URLSearchParams();
-      if (!(query instanceof URLSearchParams)) {
+      const pairs = [];
+      if (query instanceof URLSearchParams) {
+        pairs.push(...query.entries());
+      } else {
         for (const [k, v] of Object.entries(query)) {
           if (v === undefined || v === null) continue;
-          if (Array.isArray(v)) v.forEach((item) => params.append(k, String(item)));
-          else params.append(k, String(v));
+          if (Array.isArray(v)) v.forEach((item) => pairs.push([k, String(item)]));
+          else pairs.push([k, String(v)]);
         }
       }
-      const text = params.toString();
+      // 线上 query 与签名 canonicalQuery 使用同一套 RFC3986 编码，避免空格/+、~ 等差异。
+      const text = pairs.map(([k, v]) => `${rfc3986(k)}=${rfc3986(v)}`).join('&');
       if (text) absolute += (absolute.includes('?') ? '&' : '?') + text;
     }
     return absolute;
@@ -412,7 +415,7 @@ export class ZeehoClient {
         appSecret: this.appSecret,
       });
     }
-    const finalHeaders = { ...signHeaders, ...headers };
+    const finalHeaders = { ...headers, ...signHeaders };
     if (basicAuth) {
       // 登录接口用 Basic；anonymous 只是「不要 Bearer」，不能把 Basic 也吞掉。
       if (!this.basic) throw new ZeehoApiError('缺少 Basic 凭据（登录接口需要）', { url });
@@ -438,7 +441,12 @@ export class ZeehoClient {
       throw new ZeehoApiError(reason, { url });
     }
     if (timer) clearTimeout(timer);
-    const text = await response.text();
+    let text;
+    try {
+      text = await response.text();
+    } catch (error) {
+      throw new ZeehoApiError(`读取响应失败：${error?.message || error}`, { url });
+    }
     const elapsed = Date.now() - startedAt;
     let json = null;
     try { json = text ? JSON.parse(text) : null; } catch { /* 401 网关返回 XML */ }
@@ -455,7 +463,7 @@ export class ZeehoClient {
       elapsed,
       requestHeaders: finalHeaders,
     };
-    if (response.status === 401 || (json && String(json.code || '').startsWith('401'))) {
+    if (response.status === 401 || (json && String(json.code || '') === '401')) {
       result.authFailed = true;
     }
     return result;
@@ -648,7 +656,10 @@ export class ZeehoClient {
 /** 从 `vehicleHomePageV2` 的响应里挑出界面要用的关键字段（容忍 null）。 */
 export function pickVehicleSummary(home) {
   const data = home?.data ?? home ?? {};
-  const soc = Number(data.bmssoc);
+  const soc = data.bmssoc === '' || data.bmssoc == null ? NaN : Number(data.bmssoc);
+  const range = data.hmiRidableMile === '' || data.hmiRidableMile == null ? NaN : Number(data.hmiRidableMile);
+  const charging = data.whetherChargeState === true || data.whetherChargeState === 1
+    || ['1', 'true', 'TRUE'].includes(String(data.whetherChargeState));
   return {
     vin: data.vinNo || '',
     name: data.vehicleName || '',
@@ -656,7 +667,7 @@ export function pickVehicleSummary(home) {
     online: data.onlineStatus || '',
     rideState: data.rideState || '',
     soc: Number.isFinite(soc) ? soc : null,
-    rangeKm: data.hmiRidableMile ?? null,
+    rangeKm: Number.isFinite(range) ? range : null,
     totalKm: data.totalRideMile ?? null,
     monthKm: data.rideMileageMonth ?? null,
     monthMinutes: data.ridingTimeMonthUnitMinute ?? null,
@@ -666,7 +677,7 @@ export function pickVehicleSummary(home) {
     ble: data.bluetoothAddress || '',
     hmiBle: data.hmiBluetoothAddress || '',
     lock: data.seatLockState ?? null,
-    charging: Boolean(data.whetherChargeState),
+    charging,
     chargeState: data.chargeState ?? null,
     wifiAddress: data.wifiAddress || '',
     refreshTime: data.refreshTime || '',
