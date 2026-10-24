@@ -113,12 +113,13 @@ python3 -m http.server 8787
 node --test tests/*.test.mjs
 ```
 
-## Android 壳
+## Android 壳补丁
 
-- 长按应用图标有「接口调试台」快捷方式，直接打开独立的 `ApiActivity` → `api.html`（车况 / OTA / 壁纸）；不等待首页首次缓存，弱网下也能立即出界面。
-- 调试台里的壁纸上传 `<input type="file">` 走系统图片选择器；WebView 已实现 `onShowFileChooser`，不需要额外权限。
+- `android/` 提供轻量 `ApiActivity` 和「接口调试台」快捷方式源码；集成后打开 `api.html`，不等待首页首次缓存。
+- 调试台里的壁纸上传 `<input type="file">` 走系统图片选择器；`ApiActivity` 已实现 `onShowFileChooser`，不需要额外权限。
 - 主题组按车型显示：`vehicleHomePageV2.themeShopFlag=1` 才出现；AE5i 当前为 0，只显示车机壁纸。
-- `app/zeehowebnext.apk` 是 WebView 壳；它加载的页面仍来自 `https://lswlc33.github.io/zeeho-3d-models/`，所以网页功能更新不需要每次重装 APK。
+- 仓库里的 `app/zeehowebnext.apk` 仍是上游 1.5.43 原包，没有合入 Android 补丁；需要按 `android/README.md` 集成，并用原 `CN=Zeeho Unlocker` keystore 重签后发布。
+- 网页功能更新仍不需要重装 APK；`api.html` 从同一 Pages 地址加载。
 
 ## 添加车模
 

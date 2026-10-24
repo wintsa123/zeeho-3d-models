@@ -1,6 +1,6 @@
 # Android 壳补丁（ApiActivity）
 
-`app/zeehowebnext.apk` 在原有 `MainActivity` 之外增加了一个轻量 `ApiActivity`，用于「接口调试台」快捷方式：
+本目录提供 Android 壳补丁：在原有 `MainActivity` 之外增加轻量 `ApiActivity`，用于「接口调试台」快捷方式：
 
 - 不再经过 `MainActivity` 的 `WebCache` 首次下载（弱网下会卡几秒到几十秒）；
 - 直接 WebView 加载 `https://lswlc33.github.io/zeeho-3d-models/api.html`；
@@ -37,6 +37,6 @@
 
 ## 构建/签名
 
-当前仓库里的 APK 是**本地 debug 证书**签名的测试包；原包证书是 `CN=Zeeho Unlocker`，本仓库没有对应 keystore。发布前必须用原 keystore 重签并 bump `versionCode`，否则不能覆盖安装原包。
+仓库里的 `app/zeehowebnext.apk` 保持上游 1.5.43 原包，**没有**合入本目录补丁。集成后必须用原 `CN=Zeeho Unlocker` keystore 重签并 bump `versionCode`，否则原包升级会因签名不一致失败；不要用 debug 证书发布。
 
 `ApiActivity` 先加载 fork Pages 的 `api.html`（PR 合并前可用），失败再回退 upstream；PR 合并后两边都可用。
