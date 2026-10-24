@@ -61,9 +61,9 @@ app/
 
 | 页面 | 做什么 | 依据 |
 | --- | --- | --- |
-| `car.html#settings` | 车辆设置：官方 App 的磁贴主页 → 开关 / 下拉 / 滑杆，写入前必须勾选确认 | 服务端 `itemsV2` 的 9 行 14 磁贴 + `vehicleSetInfo` 当前值 |
+| `car.html#settings` | 车辆设置：官方 App 的磁贴主页 → 开关 / 下拉 / 滑杆，写入前必须勾选确认；页内还有「车机壁纸」卡片（打开壁纸页 / **修改壁纸信息** / 上传） | 服务端 `itemsV2` 的 9 行 14 磁贴 + `vehicleSetInfo` 当前值 |
 | `car.html#wallpaper` | 车机壁纸：内置壁纸、我的壁纸（预览图）、应用到车机并轮询下发进度、删除、上传 | `vehicle/homePageV2` 的 `subjectWallpaperConfig` + `wallpaper/*` |
-| `car.html#ota` | OTA：仪表/App 版本、`fileInfo` 固件包（地址打码）、任务列表/升级记录、红点内容、`checkVersion` | `ota/mmi/info/v2`、`ota/list`、`otaRecord`、`red-point/content` |
+| `car.html#ota` | OTA：仪表/App 版本（**「检查更新」在固件版本卡片右上角**）、`fileInfo` 固件包（地址打码）、任务列表/升级记录、红点内容 | `ota/mmi/info/v2`、`ota/list`、`otaRecord`、`red-point/content`、`checkVersion` |
 
 入口在哪：
 

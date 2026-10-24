@@ -323,6 +323,8 @@ const EP = {
   wallDelete:    { path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/deleteWallpaperV2/{id}', method: 'DELETE' },
   wallProgress:  { path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/useWallpaperProgress/{recordId}' },
   wallSave:      { path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/save', method: 'POST' },
+  // 官方 534 条清单里是 POST；早期抓包文档记的是 PUT，所以 UI 上留了方法切换。
+  wallUpdate:    { path: '/v1.0/app/cfmotoserverapp/vehicle/wallpaper/update/{id}', method: 'POST' },
 
   checkVersion:  { path: '/v1.0/app/cfmotoserverapp/checkVersion' },
   otaInfo:       { path: '/v1.0/app/cfmotoserverapp/ota/mmi/info/v2' },
@@ -555,6 +557,7 @@ function renderSettings() {
       <div class="card-head"><h2>设置项</h2><span class="sub">点磁贴进入</span></div>
       <div class="card-body" style="display:grid;gap:14px">${rowsHtml || '<div class="empty">没有读到设置项</div>'}</div>
     </section>
+    ${renderWallpaperEntry()}
     ${looseItems.length ? `<section class="card">
       <div class="card-head"><h2>其他设置项</h2><span class="sub">能力表里有、官方主页没挂磁贴</span></div>
       <div class="card-body">
@@ -569,7 +572,34 @@ function renderSettings() {
     button.addEventListener('click', () => openTile(button.dataset.tile));
   }
   $('open-loose')?.addEventListener('click', () => openItemsSheet('其他设置项', '未挂进官方磁贴的能力项', looseItems));
+  $('wall-open')?.addEventListener('click', () => showTab('wallpaper'));
+  $('wall-edit')?.addEventListener('click', () => openWallpaperEdit());
+  $('wall-upload-entry')?.addEventListener('click', async () => { await showTab('wallpaper'); $('wall-file')?.click(); });
   wireAdvancedSettings();
+}
+
+function renderWallpaperEntry() {
+  const meta = state.wallpaper?.meta || wallpapersFromHome(state.home || {});
+  const supported = meta?.supported;
+  const res = meta?.width && meta?.height ? `${meta.width}×${meta.height}` : '分辨率未读到';
+  const count = state.wallpaper?.count;
+  return `
+    <section class="card">
+      <div class="card-head"><h2>车机壁纸</h2><span class="sub">修改 / 上传 / 应用</span></div>
+      <div class="card-body">
+        <dl class="kv">
+          <dt>仪表</dt><dd>${esc(res)}${supported === false ? ' · 官方接口说这台车不支持自定义壁纸' : ''}</dd>
+          <dt>我的壁纸</dt><dd>${count === null || count === undefined ? '点「修改壁纸信息」时读取' : `${count} 张`}</dd>
+        </dl>
+        <div class="btnrow">
+          <button class="btn" type="button" id="wall-open">打开壁纸页</button>
+          <button class="btn primary" type="button" id="wall-edit">修改壁纸信息</button>
+          <button class="btn ghost" type="button" id="wall-upload-entry">上传新壁纸</button>
+        </div>
+        <p class="hint" style="margin-top:8px">改名走 <span class="mono">vehicle/wallpaper/update/{id}</span>（官方清单写 POST，早期文档写 PUT）；
+          应用/删除/上传在「车机壁纸」页。</p>
+      </div>
+    </section>`;
 }
 
 function renderRawSettings() {
@@ -871,6 +901,87 @@ function renderWallpaper() {
   $('wall-file').addEventListener('change', (event) => uploadWallpaper(event.target.files?.[0]));
 }
 
+/** 壁纸「修改」入口：改名/改配置（车辆设置页按钮进来）。 */
+async function openWallpaperEdit(preselectId) {
+  let data;
+  try {
+    data = await loadWallpaper(true);
+  } catch (error) {
+    toast(`壁纸列表读取失败：${error.message}`);
+    return;
+  }
+  const list = data.list || [];
+  if (!list.length) {
+    toast('这个账号下还没有自定义壁纸，先上传一张');
+    return;
+  }
+  const current = list.find((w) => String(w.id) === String(preselectId)) || list[0];
+  $('sheet-title').textContent = '修改壁纸信息';
+  $('sheet-sub').textContent = `共 ${list.length} 张 · 改名会同步到账号`;
+  $('sheet-body').innerHTML = `
+    <div class="field">
+      <label for="we-pick">选择壁纸</label>
+      <select id="we-pick">
+        ${list.map((w) => `<option value="${esc(w.id)}"${String(w.id) === String(current.id) ? ' selected' : ''}>${esc(w.name || `#${w.id}`)}${w.inUse ? '（使用中）' : ''}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label for="we-name">新的壁纸名称</label>
+      <input id="we-name" maxlength="24" value="${esc(current.name || '')}" placeholder="不超过 24 个字符">
+    </div>
+    <div class="field">
+      <label for="we-method">请求方法</label>
+      <select id="we-method">
+        <option value="POST" selected>POST（官方清单）</option>
+        <option value="PUT">PUT（早期文档）</option>
+      </select>
+    </div>
+    <details class="raw">
+      <summary>请求体（可改，默认只带 wallpaperName + vinNo）</summary>
+      <textarea id="we-body" spellcheck="false">${esc(JSON.stringify({ wallpaperName: current.name || '', vinNo: state.vin }, null, 2))}</textarea>
+    </details>
+    <p class="hint" style="margin-top:8px">接口没有真机验证过：返回 40004 多半是字段名不对，返回 30121 是签名/网关问题。</p>`;
+  $('sheet-foot').innerHTML = '<button class="btn ghost" type="button" id="we-cancel">取消</button><button class="btn primary" type="button" id="we-save">保存修改</button>';
+
+  const pick = $('we-pick');
+  pick.addEventListener('change', () => {
+    const wall = list.find((w) => String(w.id) === String(pick.value));
+    if (!wall) return;
+    $('we-name').value = wall.name || '';
+    $('we-body').value = JSON.stringify({ wallpaperName: wall.name || '', vinNo: state.vin }, null, 2);
+  });
+  $('we-name').addEventListener('input', () => {
+    try {
+      const body = JSON.parse($('we-body').value);
+      body.wallpaperName = $('we-name').value;
+      $('we-body').value = JSON.stringify(body, null, 2);
+    } catch { /* 用户改坏了就先不动 */ }
+  });
+  $('we-cancel').addEventListener('click', () => $('sheet').close());
+  $('we-save').addEventListener('click', () => {
+    const id = pick.value;
+    const method = $('we-method').value;
+    let payload;
+    try { payload = JSON.parse($('we-body').value); } catch (error) { toast(`请求体不是合法 JSON：${error.message}`); return; }
+    if (!String(payload.wallpaperName || '').trim()) { toast('名称不能为空'); return; }
+    $('sheet').close();
+    confirmWrite({
+      title: '修改壁纸信息',
+      sub: `${method} update/${id}`,
+      body: `<pre class="log">${esc(JSON.stringify(payload, null, 2))}</pre>
+        <p class="hint">这是写操作：会改账号下的壁纸记录，不影响车机上正在用的那张。</p>`,
+      run: async () => {
+        const result = await api('wallUpdate', { pathParams: { id }, method, body: payload });
+        if (!result.ok) throw new Error(result.message || result.code || `HTTP ${result.http}`);
+        toast('已保存');
+        await loadWallpaper(true);
+        rerender();
+      },
+    });
+  });
+  $('sheet').showModal();
+}
+
 function openWallpaper(id) {
   const wall = (state.wallpaper.list || []).find((w) => String(w.id) === String(id));
   if (!wall) return;
@@ -1007,7 +1118,10 @@ function renderOta() {
   const check = ota.check;
   view.innerHTML = `
     <section class="card">
-      <div class="card-head"><h2>OTA / 固件</h2><span class="sub">App 3.0.6 新增能力</span></div>
+      <div class="card-head">
+        <h2>固件版本</h2><span class="sub">OTA / App 3.0.6</span>
+        <div style="margin-left:auto"><button class="btn small primary" type="button" id="ota-check">检查更新</button></div>
+      </div>
       <div class="card-body">
         <dl class="kv">
           <dt>仪表版本</dt><dd>${esc(info?.softwareVersion || info?.otaVersion || '—')}</dd>
@@ -1018,7 +1132,6 @@ function renderOta() {
         </dl>
         <div class="btnrow">
           <button class="btn" type="button" id="ota-refresh">刷新</button>
-          <button class="btn primary" type="button" id="ota-check">检查更新（checkVersion）</button>
           <button class="btn ghost" type="button" id="ota-help">下载包地址说明</button>
         </div>
         <p class="hint" id="ota-check-hint" style="margin-top:8px">${check ? (check.hasUpdate ? `有新版：${esc(check.targetVersion || '')}` : '已是最新（checkVersion 返回 false）') : 'checkVersion 只回 true/false，包地址在 ota/mmi/info/v2 的 fileInfo 里。'}</p>
@@ -1152,6 +1265,13 @@ function confirmWrite({ title, sub, body, run, actionLabel = '执行' }) {
 }
 
 /* ============================ 视图切换 ============================ */
+/** 按当前 tab 重绘（从别的页触发的写操作不要直接 renderWallpaper，会把视图切走）。 */
+function rerender() {
+  if (state.tab === 'settings') renderSettings();
+  else if (state.tab === 'wallpaper') renderWallpaper();
+  else renderOta();
+}
+
 async function showTab(tab) {
   state.tab = tab;
   for (const button of document.querySelectorAll('.tabbar button')) {
@@ -1217,6 +1337,10 @@ function wireShell() {
   for (const button of document.querySelectorAll('.tabbar button')) {
     button.addEventListener('click', () => showTab(button.dataset.tab));
   }
+  window.addEventListener('hashchange', () => {
+    const tab = location.hash.replace('#', '');
+    if (['settings', 'wallpaper', 'ota'].includes(tab) && tab !== state.tab) showTab(tab);
+  });
   $('vin-select').addEventListener('change', async (event) => {
     state.vin = event.target.value;
     bridge.setVin(state.vin);

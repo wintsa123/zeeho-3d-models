@@ -401,7 +401,7 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 | GET | `useWallpaperProgress/{recordId}` | path: recordId | 下发进度；recordId 不是壁纸 id，未验证 |
 | POST | `useWallpaper` | body：id / vinNo 等 | 写操作：下发壁纸到车机，未执行 |
 | DELETE | `deleteWallpaperV2/{id}` | path: id | 写操作：删壁纸，未执行 |
-| PUT | `update/{id}` | path: id；body：壁纸信息 | 写操作：修改壁纸信息，未执行 |
+| PUT / POST | `update/{id}` | path: id；body：壁纸信息（`wallpaperName` 必填） | 写操作：修改壁纸信息，未执行。**方法有分歧**：早期抓包文档记 PUT，3.0.6 客户端清单（`out/api_inventory.csv`）记 POST；`car.html` 默认 POST，表单里可切 PUT |
 | POST | `save` | multipart 图片 | 写操作：上传自定义壁纸；调试台只发 JSON，文件字段未验证 |
 | POST | `bluetooth/report` | body：vinNo / id / status | 写操作：蓝牙传输状态上报，未验证 |
 
@@ -522,7 +522,7 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 
 | Tab | 内容 | 主要接口 |
 | --- | --- | --- |
-| `#settings` | 车辆设置：官方磁贴 → 开关/下拉/滑杆，写入前二次确认 | `itemsV2` / `items` / `vehicleSetInfo` / `addVehicleSet` |
+| `#settings` | 车辆设置：官方磁贴 → 开关/下拉/滑杆，写入前二次确认；页内「车机壁纸」卡片提供**修改壁纸信息**入口 | `itemsV2` / `items` / `vehicleSetInfo` / `addVehicleSet` / `wallpaper/update/{id}` |
 | `#wallpaper` | 车机壁纸：内置壁纸（`subjectWallpaperConfig`）、我的壁纸、应用到车机、删除、上传 | `wallpaper/*` |
 | `#ota` | OTA：版本、固件包（`fileUrl` 打码）、任务/记录、红点内容、检查更新 | `ota/mmi/info/v2`、`ota/list`、`otaRecord`、`redPoint` |
 
