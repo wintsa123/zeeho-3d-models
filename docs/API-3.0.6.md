@@ -287,6 +287,19 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 | GET | `redPoint` | query: vinNo | 数字（`0` / `1`） | 是否有 OTA 红点 |
 | GET | `app/ota/v2/red-point/content` | query: vinNo | `status`、`title`、`content`、`fileInfoList`、`multiDownloadUpgradeContent` | `fileInfoList` 与 `fileInfo` 同构 |
 | GET | `upstatus` | query: vinNo | `{status, errCode, errDesc}`，实测 `{status:1}` | 升级状态 |
+| GET | `ota/pre/download/setting` | query: vinNo | 预下载开关 | 官方 App 同款；字段未验证 |
+| POST | `ota/pre/download/setting` | body | 设置预下载 | 写 |
+| GET | `app/ota/autoUpgradeSetInfo` | query: vinNo | 自动升级配置 | 官方 App 同款 |
+| POST | `app/ota/autoUpgradeSetInfo` | body | 设置自动升级 | 写 |
+| GET | `getOtaHelp` | — | 升级帮助文案 | 纯文案 |
+| GET | `orderOtaUpgrade` | query | 预约升级 | 写；未验证 |
+| POST | `reallyOtaUpgrade` | body | 真正开始升级 | 写；未验证 |
+| POST | `ota/wifi/set` | body | 仪表 Wi-Fi 配网 | 写；未验证 |
+| POST | `ota/popSelect` | body | 升级弹窗选择 | 写；未验证 |
+| GET | `ota/redPointType` | query | 红点类型 | — |
+
+> 这些端点来自 `out/api_inventory.csv`（从 3.0.6 客户端 dex 提取的 534 条 Retrofit 清单），
+> 路径存在但**参数与返回未逐个验证**；`car.html` 只把只读的几个挂到了界面上，写操作留了确认步骤。
 
 ### 5.5 消息（`mine:`）
 
@@ -401,6 +414,49 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 
 > 结论：**壁纸的列表/数量/适用车型/详情已经实测可用**；`useWallpaper`、删除、上传、蓝牙上报属于写操作，只登记未执行；主题列表/详情受 `themeShopFlag` 限制，当前 AE5i 的 `themeShopFlag=0`，调试台直接隐藏「车机主题」分组；只有读到 `themeShopFlag=1` 的车型才显示。
 
+### 5.12 车辆设置（`app:`，3.0.6；结构由服务端下发）
+
+`car.html` 的「车辆设置」页就是按这一节的契约做的，**不要在客户端硬编码 47 项清单**：
+官方 App 自己也是拿服务端的能力表 + 当前值渲染的，硬编码会在换车型/换固件时直接错位。
+
+| 方法 | 路径 | 关键参数 | 返回要点 |
+| --- | --- | --- | --- |
+| GET | `vehicleSet/items` | query: vinNo, homepageInvoke | 47 条能力表：`functionCode`、`isSupport`、`isSupportSetting`、`isSupportBlueTooth`、`blueToothServiceCodeList[{functionName, serviceCode}]`、`functionConfig`、`restrictVersion` |
+| GET | `vehicleSet/itemsV2` | query: vinNo, homepageInvoke | **官方「车辆设置主页」的磁贴布局**，见下 |
+| GET | `vehicleSet/vehicleSetInfo/{vinNo}` | path: vinNo | 当前值（约 90 个 camelCase 键）+ `disabledContent[]` + `rideFunctionVOList` |
+| GET | `vehicleSet/blueToothServiceCode` | query: vinNo | `[{functionName, serviceCode, isSupportSetting}]`，蓝牙下发用的服务码 |
+| GET | `vehicleSet/chargePower/options` | query: vinNo | 充电功率档位 `{value,key/label}`，`chargingPower` 下拉用 |
+| POST | `vehicleSet/addVehicleSet` | body: `AddVehicleSetReq` | 开关/枚举类写入的**主路径** |
+| PUT | `vehicleSet/propertyOne/one`、`propertyTwo/one` | body 属性对 | 通用属性写入（未验证字段名） |
+| PUT | `vehicleSet/motoPlay/one`、`lowPowerRule/one` | body | 投屏模式、低电量规则 |
+
+`itemsV2` 的 `data.vehicleSetFunctionVOList` 是**二维数组**：外层是「行」，每行是磁贴；
+每个磁贴 `{functionCode, functionName, describe, type, subFunctions[]}`，`subFunctions` 才是具体设置项。
+实测 AE5i Pro：**9 行 / 14 个磁贴**（防盗与安全、音效设置、自定义按键设置、仪表设置、钥匙与共享、
+骑行偏好设置、便捷骑行、辅助驾驶、伴我回家、自动驻车、电池信息与设置、智能周边、车辆信息、功能许愿池）。
+另有 `vehicleTypeDetailFunctionVOList`（48 条本车型明细），可与 `items` 交叉校验。
+
+`vehicleSetInfo` 的几个坑（都是实测）：
+
+- **同一个值有多套键**：`tcsTractionControl` / `etcsTractionControl`、`cushionSensor` / `ecushionSensor`，
+  值还可能不一致；按「精确 → 别名 → 忽略大小写」取，不要按名字猜。
+- **上游拼写**：电子制动 `BRAKE_POWER` 的值键是 **`barkePower`**；`MOTOPLAY` → `motoPlay`；
+  `SOUND_EFFECT` 的总开关实际叫 `soundEffectStatus`，明细在 `soundEffectSetting{...}` 里（15 个子项）。
+- `disabledContent[{functionName, content}]` 是「为什么这项点不动」的官方文案（例如
+  `automaticShutdown` 需要先开座垫感应），有就展示，别自己编。
+- 带 `_GO` 后缀的 functionCode（`AUTO_SHUTDOWN_TIME_GO`、`AUTOMATIC_PARKING_GO`）对应的是 v1 能力码别名。
+
+写入体（字段名来自 3.0.6 dex 的 `com.cfmoto.bean.reqest.AddVehicleSetReq`）：
+
+```json
+{ "vin": "TESTVIN0000000001", "serviceCode": "603980085", "vehicleSetEnum": "CRUISE_CONTROL_HOLD", "commandParam": "1", "flag": true, "message": "" }
+```
+
+- `serviceCode` 来自 `blueToothServiceCode` / `items.*.blueToothServiceCodeList`，**字符串化**传；
+  服务端没给 serviceCode 的项，客户端下发不了（只能车机上改），这一点在 UI 上要说清楚。
+- `commandParam` 一律字符串（开关 `"1"/"0"`，枚举就是枚举值，数值项给数字字符串）。
+- `flag` / `message` 的语义**未验证**：仓库里的实现固定 `flag=true`、`message=""`，以车端返回为准。
+
 ## 6. 错误码
 
 | code | HTTP | 含义 | 常见触发 / 排查方向 |
@@ -460,7 +516,21 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 - 登录态优先读 `localStorage['zeeho.token']`：先在 `index.html` 登录一次，回到调试台刷新即可复用。
 - 写操作需勾选确认（见 §7）。
 
-### 8.4 环境变量
+### 8.4 车辆工具页 `car.html`
+
+`api.html` 是「逐个接口调」的调试台；`car.html` 是**给人用的**三页视图，同样复用面板登录态：
+
+| Tab | 内容 | 主要接口 |
+| --- | --- | --- |
+| `#settings` | 车辆设置：官方磁贴 → 开关/下拉/滑杆，写入前二次确认 | `itemsV2` / `items` / `vehicleSetInfo` / `addVehicleSet` |
+| `#wallpaper` | 车机壁纸：内置壁纸（`subjectWallpaperConfig`）、我的壁纸、应用到车机、删除、上传 | `wallpaper/*` |
+| `#ota` | OTA：版本、固件包（`fileUrl` 打码）、任务/记录、红点内容、检查更新 | `ota/mmi/info/v2`、`ota/list`、`otaRecord`、`redPoint` |
+
+- 签名走 `sdk/bridge.js`：面板模式借用同目录 `index.html` 的 `ZEEHO_SIGN` / `API.call`，自填模式用 `sdk/zeeho-api.js`。
+- 入口：`api.html` 顶栏「车辆工具」、面板 `index.html` 右下角悬浮 chip（由 `tools/patch-panel-entry.mjs` 注入）。
+- 数据模型在 `sdk/vehicle-settings.js`（设置）与 `sdk/vehicle-media.js`（壁纸/OTA），都有离线单测。
+
+### 8.5 环境变量
 
 | 变量 | 用途 |
 | --- | --- |
