@@ -13,7 +13,9 @@ import android.widget.FrameLayout;
 import android.widget.ProgressBar;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
+import android.webkit.WebResourceError;
 import android.webkit.WebResourceRequest;
+import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -23,7 +25,9 @@ import android.webkit.WebViewClient;
  * 不再等待 index.html 的首次缓存（那一步在弱网下会造成几秒到几十秒的“点了没反应”）。
  */
 public class ApiActivity extends Activity {
-    private static final String API_URL = "https://lswlc33.github.io/zeeho-3d-models/api.html";
+    // PR 合并前先走 fork Pages（已部署 feat/api-console）；合并后无论走哪个都可用。
+    private static final String API_URL = "https://wintsa123.github.io/zeeho-3d-models/api.html";
+    private static final String FALLBACK_URL = "https://lswlc33.github.io/zeeho-3d-models/api.html";
     private static final String[] BASE_PREFIXES = {
             "https://lswlc33.github.io/zeeho-3d-models/",
             "https://wintsa123.github.io/zeeho-3d-models/"
@@ -33,6 +37,7 @@ public class ApiActivity extends Activity {
     private WebView webView;
     private ProgressBar progress;
     private ValueCallback<Uri[]> fileCallback;
+    private boolean fallbackTried;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -73,6 +78,23 @@ public class ApiActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 if (progress != null) progress.setVisibility(View.GONE);
+            }
+
+            @Override
+            public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
+                if (request != null && request.isForMainFrame() && !fallbackTried) {
+                    fallbackTried = true;
+                    view.loadUrl(FALLBACK_URL);
+                }
+            }
+
+            @Override
+            public void onReceivedHttpError(WebView view, WebResourceRequest request, WebResourceResponse response) {
+                if (request != null && request.isForMainFrame() && !fallbackTried
+                        && response != null && response.getStatusCode() == 404) {
+                    fallbackTried = true;
+                    view.loadUrl(FALLBACK_URL);
+                }
             }
 
             @Override

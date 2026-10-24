@@ -39,4 +39,4 @@
 
 当前仓库里的 APK 是**本地 debug 证书**签名的测试包；原包证书是 `CN=Zeeho Unlocker`，本仓库没有对应 keystore。发布前必须用原 keystore 重签并 bump `versionCode`，否则不能覆盖安装原包。
 
-`ApiActivity` 的默认 URL 是 `https://lswlc33.github.io/zeeho-3d-models/api.html`；PR 合并前该文件在 upstream 不存在，快捷方式会 404。
+`ApiActivity` 先加载 fork Pages 的 `api.html`（PR 合并前可用），失败再回退 upstream；PR 合并后两边都可用。
