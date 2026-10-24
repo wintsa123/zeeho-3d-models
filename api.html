@@ -780,6 +780,10 @@ function panelParams(values) {
  * 只有面板没有的 3.0.6 端点（OTA/版本等）才退回直接签名请求。
  */
 async function panelCall(endpoint, values, token, body) {
+  if (!state.panelWin) {
+    setStatus('warn', '加载面板签名…');
+    toast('首次加载面板签名（约 1MB），请稍等');
+  }
   const ready = await loadPanel();
   if (!ready) throw new Error('面板签名加载失败：请刷新本页，或在设置里改用「自填凭据」');
   const api = state.panelWin?.API;
@@ -1178,17 +1182,13 @@ async function boot() {
   selectEndpoint('ota_info');
   updateSetupUi();
 
-  if (state.mode === 'panel') {
-    const ready = await loadPanel();
-    if (ready) {
-      $('cfg-status').textContent = '面板签名已就绪';
-    } else {
-      $('cfg-status').textContent = '面板签名加载失败，可在设置里改「自填凭据」';
-    }
-  }
+  // 面板 iframe 有 1MB+ 的 index.html，首屏不再预加载；等真正调用面板端点时再按需加载。
+  $('cfg-status').textContent = '面板签名按需加载';
   updateSetupUi();
 
   if (state.token) {
+    // 首屏先渲染；面板签名在后台预热，避免第一次点接口时才开始拉 1MB 的 index.html。
+    if (state.mode === 'panel') setTimeout(() => { void loadPanel(); }, 600);
     setStatus('warn', '已读取到 token，正在读车况');
     try {
       await refreshVehicles();
@@ -1216,7 +1216,7 @@ function updateSetupUi() {
     }
     setStatus('warn', '未登录');
   } else {
-    const label = state.mode === 'panel' ? '面板签名 + 已登录' : '自填凭据 + 已登录';
+    const label = state.mode === 'panel' ? '面板按需 + 已登录' : '自填凭据 + 已登录';
     if ($('state-dot').className.includes('bad')) return;
     setStatus('ok', label);
   }
