@@ -865,7 +865,11 @@ function curlFor({ url, method, headers, body }) {
   const safeHeaders = redactedHeaders(headers);
   const lines = [`curl -sS -X ${method} ${shellQuote(url)}`];
   for (const [k, v] of Object.entries(safeHeaders)) lines.push(`  -H ${shellQuote(`${k}: ${v}`)}`);
-  if (body) lines.push(`  --data ${shellQuote(body)}`);
+  if (body) {
+    let safeBody = body;
+    try { safeBody = JSON.stringify(redactForDisplay(JSON.parse(body))); } catch { /* 非 JSON 原样 */ }
+    lines.push(`  --data ${shellQuote(safeBody)}`);
+  }
   return lines.join(' \\\n');
 }
 
