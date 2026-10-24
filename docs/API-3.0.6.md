@@ -41,7 +41,7 @@
 | 文件 | 角色 |
 | --- | --- |
 | `sdk/zeeho-api.js` | **零依赖 SDK**：纯 JS SHA-1 / MD5、签名、`ZeehoClient`、便捷方法与 `pickVehicleSummary`。浏览器与 Node 通用，不依赖 DOM |
-| `sdk/endpoints.js` | 接口目录元数据（面板来源 39 项，其中 37 项有 panelId；另含 3.0.6 补充端点，共 57 项），调试台表单与 CLI 共用 |
+| `sdk/endpoints.js` | 接口目录元数据（面板来源 39 项，其中 36 项有 panelId；另含 3.0.6 补充端点，共 57 项），调试台表单与 CLI 共用 |
 | `api.html` | **调试台**：分组端点列表、参数表单、JSON 响应、车况 / OTA 概览 |
 | `tools/zeeho-cli.mjs` | **CLI**：`login` / `vehicle` / `ota` / `watch` / `models` / `call` |
 
