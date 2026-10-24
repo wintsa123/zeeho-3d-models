@@ -113,6 +113,13 @@ python3 -m http.server 8787
 node --test tests/*.test.mjs
 ```
 
+## Android 壳
+
+- 长按应用图标有「接口调试台」快捷方式，直接打开 `api.html`（车况 / OTA / 壁纸 / 主题）。
+- 调试台里的壁纸上传 `<input type="file">` 走系统图片选择器；WebView 已实现 `onShowFileChooser`，不需要额外权限。
+- 主题组按车型显示：`vehicleHomePageV2.themeShopFlag=1` 才出现；AE5i 当前为 0，只显示车机壁纸。
+- `app/zeehowebnext.apk` 是 WebView 壳；它加载的页面仍来自 `https://lswlc33.github.io/zeeho-3d-models/`，所以网页功能更新不需要每次重装 APK。
+
 ## 添加车模
 
 1. 把车模文件放进 `models/`，用车型命名；
