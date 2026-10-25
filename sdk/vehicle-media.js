@@ -366,6 +366,71 @@ export function wallpaperImages(wallpaper) {
 }
 
 /**
+ * 车机壁纸是**分两块图**的（官方 App 3.0.6 的证据）：
+ *   · 整屏壁纸（1024×600，`BigWallPaperEditActivity`）；
+ *   · 中间速度卡片区域的小图（`SmallWallPaperEditActivity` + `SmallWallpaperUtils.calculateSpeedCardMetrics`）；
+ * 服务端把两块放在同一条记录里：`wallpaperContent` 是 JSON 字符串，
+ * 元素形状由 dex 里的 `WallpaperConfigItem` 给出 —— `{ type, url, subjectUrl }`，
+ * `type` 区分是整屏还是速度卡（`parseType2Wallpaper` / `parseSpeedCardWallpaper`），
+ * 应用时按 `serviceAreaType` 逐块下发。
+ *
+ * 这里只做**容错解析**：type 为 '2'(或含 speed/card 的标记) 视为速度卡，其余当整屏；
+ * 没写 type 时按数组顺序（第一张整屏、第二张速度卡）。
+ */
+export function parseWallpaperAreas(wallpaper) {
+  const raw = wallpaper && typeof wallpaper === 'object'
+    ? (wallpaper.raw && typeof wallpaper.raw === 'object' ? wallpaper.raw : wallpaper)
+    : {};
+  const rawContent = raw?.wallpaperContent ?? raw?.content ?? raw?.wallpaperContentJson;
+  // deepParse 只处理 JSON 字符串；已经解析好的对象要原样用。
+  const content = typeof rawContent === 'string' ? deepParse(rawContent) : rawContent;
+  let entries = [];
+  if (Array.isArray(content)) entries = content;
+  else if (content && typeof content === 'object') {
+    // 单张图（对象里直接带 url/imageUrl）与「带列表字段」两种形态都要吃。
+    const list = content.items || content.list || content.wallpapers || content.wallpaperContent;
+    entries = Array.isArray(list) ? list : [content];
+  }
+  const items = entries
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const url = toText(item.url ?? item.imageUrl ?? item.picUrl ?? item.wallpaperUrl);
+      const subjectUrl = toText(item.subjectUrl);
+      const type = toText(item.type ?? item.areaType ?? item.serviceAreaType);
+      const resolved = url || subjectUrl;
+      return resolved ? { index, type, url: resolved, subjectUrl } : null;
+    })
+    .filter(Boolean);
+
+  const isSpeed = (item) => String(item.type) === '2' || /speed|card/i.test(String(item.type));
+  const typed = items.filter((item) => String(item.type) !== '');
+  let main = null;
+  let speedCard = null;
+  if (typed.length) {
+    main = typed.find((item) => !isSpeed(item)) || null;
+    speedCard = typed.find(isSpeed) || null;
+  } else if (items.length) {
+    // 服务端没写 type 时按数组顺序：第一张整屏、第二张速度卡（官方列表里就是这个顺序）。
+    main = items[0];
+    speedCard = items[1] || null;
+  }
+  return {
+    main: main ? { url: main.url, subjectUrl: main.subjectUrl, type: main.type || '1' } : null,
+    speedCard: speedCard ? { url: speedCard.url, subjectUrl: speedCard.subjectUrl, type: speedCard.type || '2' } : null,
+    items,
+  };
+}
+
+/** 生成 `wallpaperContent`（两块图）。下游上传接口若收 JSON，就把它序列化后带上。 */
+export function buildWallpaperContent(options = {}) {
+  const { mainUrl = '', speedCardUrl = '' } = options || {};
+  const items = [];
+  if (mainUrl) items.push({ type: '1', url: mainUrl, subjectUrl: mainUrl });
+  if (speedCardUrl) items.push({ type: '2', url: speedCardUrl, subjectUrl: speedCardUrl });
+  return JSON.stringify(items);
+}
+
+/**
  * 壁纸下发进度。
  *
  * **假设（未验证）**：`useWallpaperProgress` 的状态枚举文档没给，这里按

@@ -286,6 +286,16 @@ body.ze-car-lock { overflow: hidden; }
   opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 120; max-width: 84vw;
 }
 .ze-car-toast.show { opacity: .96; transform: translate(-50%, 0); }
+/* 「我的 → 固件版本」卡片右上角的 OTA 入口 */
+.ze-car-mine-btn {
+  position: absolute; top: 10px; right: 12px; z-index: 2;
+  border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 550;
+  background: color-mix(in srgb, var(--md-sys-color-primary, #7457b8) 14%, transparent);
+  color: var(--md-sys-color-primary, #7457b8);
+}
+.ze-car-mine-btn:active { transform: scale(.97); }
+
 /* 面板里两个 dialog 没有 api.html 的样式，这里补最小集 */
 #car-dialog, #car-confirm {
   --surface: var(--bg-surface, #fffbfe);
@@ -398,18 +408,6 @@ body.ze-car-lock { overflow: hidden; }
 /* ==== ZEEHO_CAR_UI:CSS:END ==== */
 </style>
 
-<div id="ze-car-sheet" hidden>
-  <div class="ze-car-head">
-    <h2>车机工具</h2>
-    <span class="ze-car-hint">壁纸 / OTA / 设置</span>
-    <button class="ze-car-close" id="ze-car-close" type="button">关闭</button>
-  </div>
-  <div class="ze-car-tabs" role="tablist">
-    <button type="button" data-ze-focus="wallpaper" aria-selected="true">车机壁纸</button>
-    <button type="button" data-ze-focus="firmware" aria-selected="false">固件 / OTA</button>
-    <button type="button" data-ze-focus="settings" aria-selected="false">车辆设置</button>
-  </div>
-  <div class="ze-car-scroll">
 
   <!-- 车辆工具：固件版本 / 车辆设置 / 车机壁纸。数据来自 App 3.0.6 接口，写入前一律二次确认。 -->
   <section class="card" id="firmware-card">
@@ -471,6 +469,10 @@ body.ze-car-lock { overflow: hidden; }
       </div>
     </div>
     <div class="card-body">
+      <div class="car-actions" style="margin:0 0 10px">
+        <button class="btn small primary" id="btn-wall-create" type="button">新建自定义壁纸（分两步）</button>
+        <span class="hint">官方流程：先传整屏壁纸，再传中间速度卡位置那张</span>
+      </div>
       <div id="wp-builtin" class="car-walls" style="margin-bottom:10px"></div>
       <div id="wp-grid" class="car-walls"><div class="hint">登录后读取壁纸…</div></div>
       <div id="wp-progress" hidden>
@@ -478,10 +480,6 @@ body.ze-car-lock { overflow: hidden; }
       </div>
     </div>
   </section>
-
-  <!--
-  </div>
-</div>
 
 <dialog id="car-dialog">
     <form method="dialog" class="dialog-head">
@@ -1843,6 +1841,71 @@ function wallpaperImages(wallpaper) {
 }
 
 /**
+ * 车机壁纸是**分两块图**的（官方 App 3.0.6 的证据）：
+ *   · 整屏壁纸（1024×600，`BigWallPaperEditActivity`）；
+ *   · 中间速度卡片区域的小图（`SmallWallPaperEditActivity` + `SmallWallpaperUtils.calculateSpeedCardMetrics`）；
+ * 服务端把两块放在同一条记录里：`wallpaperContent` 是 JSON 字符串，
+ * 元素形状由 dex 里的 `WallpaperConfigItem` 给出 —— `{ type, url, subjectUrl }`，
+ * `type` 区分是整屏还是速度卡（`parseType2Wallpaper` / `parseSpeedCardWallpaper`），
+ * 应用时按 `serviceAreaType` 逐块下发。
+ *
+ * 这里只做**容错解析**：type 为 '2'(或含 speed/card 的标记) 视为速度卡，其余当整屏；
+ * 没写 type 时按数组顺序（第一张整屏、第二张速度卡）。
+ */
+function parseWallpaperAreas(wallpaper) {
+  const raw = wallpaper && typeof wallpaper === 'object'
+    ? (wallpaper.raw && typeof wallpaper.raw === 'object' ? wallpaper.raw : wallpaper)
+    : {};
+  const rawContent = raw?.wallpaperContent ?? raw?.content ?? raw?.wallpaperContentJson;
+  // deepParse 只处理 JSON 字符串；已经解析好的对象要原样用。
+  const content = typeof rawContent === 'string' ? deepParse(rawContent) : rawContent;
+  let entries = [];
+  if (Array.isArray(content)) entries = content;
+  else if (content && typeof content === 'object') {
+    // 单张图（对象里直接带 url/imageUrl）与「带列表字段」两种形态都要吃。
+    const list = content.items || content.list || content.wallpapers || content.wallpaperContent;
+    entries = Array.isArray(list) ? list : [content];
+  }
+  const items = entries
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
+      const url = toText(item.url ?? item.imageUrl ?? item.picUrl ?? item.wallpaperUrl);
+      const subjectUrl = toText(item.subjectUrl);
+      const type = toText(item.type ?? item.areaType ?? item.serviceAreaType);
+      const resolved = url || subjectUrl;
+      return resolved ? { index, type, url: resolved, subjectUrl } : null;
+    })
+    .filter(Boolean);
+
+  const isSpeed = (item) => String(item.type) === '2' || /speed|card/i.test(String(item.type));
+  const typed = items.filter((item) => String(item.type) !== '');
+  let main = null;
+  let speedCard = null;
+  if (typed.length) {
+    main = typed.find((item) => !isSpeed(item)) || null;
+    speedCard = typed.find(isSpeed) || null;
+  } else if (items.length) {
+    // 服务端没写 type 时按数组顺序：第一张整屏、第二张速度卡（官方列表里就是这个顺序）。
+    main = items[0];
+    speedCard = items[1] || null;
+  }
+  return {
+    main: main ? { url: main.url, subjectUrl: main.subjectUrl, type: main.type || '1' } : null,
+    speedCard: speedCard ? { url: speedCard.url, subjectUrl: speedCard.subjectUrl, type: speedCard.type || '2' } : null,
+    items,
+  };
+}
+
+/** 生成 `wallpaperContent`（两块图）。下游上传接口若收 JSON，就把它序列化后带上。 */
+function buildWallpaperContent(options = {}) {
+  const { mainUrl = '', speedCardUrl = '' } = options || {};
+  const items = [];
+  if (mainUrl) items.push({ type: '1', url: mainUrl, subjectUrl: mainUrl });
+  if (speedCardUrl) items.push({ type: '2', url: speedCardUrl, subjectUrl: speedCardUrl });
+  return JSON.stringify(items);
+}
+
+/**
  * 壁纸下发进度。
  *
  * **假设（未验证）**：`useWallpaperProgress` 的状态枚举文档没给，这里按
@@ -2216,7 +2279,7 @@ function findOtaFiles(anyJson) {
   walk(anyJson, 0);
   return files;
 }
-    return { parseJsonField, normalizeWallpaperPage, normalizeWallpaperDetail, wallpapersFromHome, normalizeProgress, buildUseWallpaperBody, wallpaperImages, normalizeOtaInfo, normalizeOtaFile, normalizeCheckVersion, normalizeOtaList, normalizeOtaRecord, normalizeOtaStatus, findOtaFiles, maskWifiAddress, maskSignedUrl, formatBytes };
+    return { parseJsonField, normalizeWallpaperPage, normalizeWallpaperDetail, wallpapersFromHome, normalizeProgress, buildUseWallpaperBody, wallpaperImages, normalizeOtaInfo, normalizeOtaFile, normalizeCheckVersion, normalizeOtaList, normalizeOtaRecord, normalizeOtaStatus, findOtaFiles, maskWifiAddress, maskSignedUrl, formatBytes, parseWallpaperAreas, buildWallpaperContent };
   })();
   return { ...settings, ...media };
 })();
@@ -2428,6 +2491,8 @@ const {
   normalizeCheckVersion: carNormalizeCheckVersion,
   maskSignedUrl: carMaskSignedUrl,
   formatBytes: carFormatBytes,
+  parseWallpaperAreas: carWallpaperAreas,
+  buildWallpaperContent: carBuildWallpaperContent,
 } = CAR_MODELS;
 
 /** 目录里没有的端点（itemsV2 / 充电功率选项 / 通用写入），就地声明。 */
@@ -2752,11 +2817,18 @@ function carRenderWallpaper() {
 function carOpenWallpaper(id) {
   const wall = (carState.walls || []).find((item) => String(item.id) === String(id));
   if (!wall) return;
+  const areas = carWallpaperAreas(wall);
   $('car-dialog-title').textContent = wall.name || `壁纸 #${wall.id}`;
+  const areaCard = (label, area, ratio) => `
+    <div style="margin-top:10px">
+      <div class="hint" style="margin-bottom:4px">${label}</div>
+      ${area?.url
+        ? `<img src="${escapeHtml(area.url)}" alt="${escapeHtml(label)}" style="width:100%;border-radius:10px;display:block;aspect-ratio:${ratio};object-fit:cover" referrerpolicy="no-referrer">`
+        : '<div class="hint">这一块还没有图</div>'}
+    </div>`;
   $('car-dialog-body').innerHTML = `
-    ${wall.imageUrl || wall.thumbUrl
-      ? `<img src="${escapeHtml(wall.imageUrl || wall.thumbUrl)}" alt="" style="width:100%;border-radius:12px;display:block" referrerpolicy="no-referrer">`
-      : '<div class="hint">没有预览图</div>'}
+    ${areaCard('整屏壁纸（1024×600）', areas.main, '16 / 9')}
+    ${areaCard('中间速度卡', areas.speedCard, '2 / 1')}
     <dl class="car-kv" style="margin-top:12px">
       <dt>状态</dt><dd>${wall.inUse ? '使用中' : '未使用'}</dd>
       <dt>可下发</dt><dd>${wall.usable === false ? '缺图片/ID，仅能看原文' : '可以下发到车机'}</dd>
@@ -2771,6 +2843,105 @@ function carOpenWallpaper(id) {
   $('wall-del').addEventListener('click', () => carDeleteWallpaper(wall));
   $('wall-rename').addEventListener('click', () => carRenameWallpaper(wall));
   $('car-dialog').showModal();
+}
+
+/**
+ * 官方壁纸是两步走：先整屏壁纸，再中间速度卡那一块（dex: BigWallPaperEditActivity / SmallWallPaperEditActivity）。
+ * 这里做成两步向导，两步各选一张图；上传按两步各发一次 multipart（带 type=1 / type=2）。
+ * 接口字段官方没公开 —— 页面上会显示实际发送的字段，失败时按提示改。
+ */
+function carCreateWallpaperWizard() {
+  const state2 = { step: 1, main: null, speed: null, name: '' };
+  const renderStep = () => {
+    const step = state2.step;
+    $('car-dialog-title').textContent = `新建壁纸（第 ${step}/2 步）`;
+    $('car-dialog-body').innerHTML = `
+      <div class="hint" style="margin-bottom:8px">
+        ${step === 1 ? '整屏壁纸：仪表全屏铺满，官方推荐 1024×600。' : '速度卡：仪表中间那块速度卡片区域，尺寸按车型面板（AE5i 约 768×300）。'}
+      </div>
+      <div class="field">
+        <label for="cw-file">${step === 1 ? '选择整屏壁纸' : '选择速度卡图片'}</label>
+        <input id="cw-file" type="file" accept="image/*">
+      </div>
+      <div id="cw-preview" class="hint">${(step === 1 ? state2.main : state2.speed) ? ((step === 1 ? state2.main : state2.speed).name || '已选择') : '还没选文件'}</div>
+      <div class="field" style="margin-top:10px">
+        <label for="cw-name">壁纸名称</label>
+        <input id="cw-name" maxlength="24" value="${escapeHtml(state2.name)}" placeholder="例如：夜景">
+      </div>
+      <p class="car-note">上传走 <span class="mono">wallpaper/save</span>（multipart）：字段
+        <span class="mono">file / wallpaperName / vinNo / type</span>（type=1 整屏、type=2 速度卡）。
+        另外会附一份 <span class="mono">wallpaperContent</span> 的两块配置。</p>`;
+    $('car-dialog-foot').innerHTML = `
+      ${step === 2 ? '<button class="btn small" id="cw-prev" type="button">上一步</button>' : ''}
+      <button class="btn small primary" id="cw-next" type="button">${step === 1 ? '下一步' : '上传两张'}</button>`;
+    $('cw-name').addEventListener('input', () => { state2.name = $('cw-name').value; });
+    $('cw-file').addEventListener('change', (event) => {
+      const file = event.target.files?.[0] || null;
+      if (step === 1) state2.main = file; else state2.speed = file;
+      $('cw-preview').textContent = file ? `${file.name} · ${carFormatBytes(file.size)}` : '还没选文件';
+    });
+    if ($('cw-prev')) {
+      $('cw-prev').addEventListener('click', () => { state2.step = 1; renderStep(); });
+    }
+    $('cw-next').addEventListener('click', () => {
+      if (step === 1) {
+        if (!state2.main) { toast('先选一张整屏壁纸'); return; }
+        state2.step = 2;
+        renderStep();
+        return;
+      }
+      if (!state2.speed) { toast('再选一张速度卡图片'); return; }
+      $('car-dialog').close();
+      carUploadTwoStep(state2);
+    });
+    $('car-dialog').showModal();
+  };
+  renderStep();
+}
+
+/** 两步上传：两次 multipart，第二次带 type=2。 */
+async function carUploadTwoStep({ main, speed, name }) {
+  if (!state.vin) { toast('还没有读到车'); return; }
+  const endpoint = byId('wallpaper_save');
+  const url = buildUrl(endpoint.path, endpoint.params, { vinNo: state.vin });
+  const content = carBuildWallpaperContent({ mainUrl: 'pending://main', speedCardUrl: 'pending://speed' });
+  carConfirm({
+    title: '上传壁纸（两步）',
+    sub: `${main.name} → 整屏；${speed.name} → 速度卡`,
+    body: {
+      url,
+      steps: [
+        { type: '1', file: main.name, wallpaperName: name || main.name.replace(/\.[^.]+$/, ''), vinNo: state.vin, wallpaperContent: content },
+        { type: '2', file: speed.name, wallpaperName: name || main.name.replace(/\.[^.]+$/, ''), vinNo: state.vin, wallpaperContent: content },
+      ],
+    },
+    run: async () => {
+      const useOwn = state.mode !== 'panel' || hasOwnCredentials();
+      const upload = async (file, type) => {
+        const form = new FormData();
+        form.append('file', file, file.name);
+        form.append('wallpaperName', name || file.name.replace(/\.[^.]+$/, '').slice(0, 24));
+        form.append('vinNo', state.vin);
+        form.append('type', String(type));
+        form.append('wallpaperContent', content);
+        const headers = useOwn ? ownHeaders(url, 'POST', '') : await panelHeaders(url, 'POST', '');
+        if (state.token) headers.Authorization = `Bearer ${state.token}`;
+        delete headers['Content-Type'];
+        const response = await fetch(url, { method: 'POST', headers, body: form, cache: 'no-store' });
+        const text = await response.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch { /* 非 JSON */ }
+        if (!(response.ok && (data?.code === '10000' || data?.code === undefined))) {
+          throw new Error(`第 ${type} 步失败：${data?.message || `HTTP ${response.status}`}`);
+        }
+      };
+      await upload(main, 1);
+      await sleep(400);
+      await upload(speed, 2);
+      toast('两张都传好了，去列表里应用');
+      await carLoadWallpaper();
+    },
+  });
 }
 
 function carApplyWallpaper(wall) {
@@ -2929,6 +3100,7 @@ carOn('btn-wall-edit', 'click', () => {
   carRenameWallpaper(wall);
 });
 carOn('btn-wall-upload', 'click', () => $('wp-file')?.click());
+carOn('btn-wall-create', 'click', () => carCreateWallpaperWizard());
 carOn('wp-file', 'change', (event) => {
   const file = event.target.files?.[0];
   event.target.value = '';
@@ -2958,61 +3130,101 @@ setTimeout(() => {
   void carInitPanels();
 }, 1200);
 /* ==== ZEEHO_PANEL_CAR:ENTRY:BEGIN ==== */
-/* 面板页的入口与 sheet 开关。
-   入口两处：
-     1) 顶栏「车机」按钮（面板切 tab/重绘都会重建 topbar，所以用 MutationObserver 补回来）；
-     2) 「车辆设置」页末尾追加一行「车机工具」，样式复用面板自己的 .group-card。
-   打开后是一个全屏 sheet，里面就是 api-car-ui.js 渲染的那三块卡片（固件 / 设置 / 壁纸）。 */
+/* 面板页的车机工具：**分开路由**，两个入口各进各的视图，不再共用一个带 tab 的 sheet。
+ *   #car-wallpaper → 只显示「车机壁纸」卡片
+ *   #car-ota       → 只显示「固件版本」卡片
+ * 入口：
+ *   · 「车辆设置」页底部一行「车机壁纸」；
+ *   · 「我的」页「固件版本」卡片右上角一个「OTA 升级」按钮。
+ * 面板的 app.js 会重绘 #scroll，所以两处入口都用 MutationObserver 补回（幂等）。
+ */
+
+const ZE_ROUTES = {
+  wallpaper: { hash: '#car-wallpaper', card: 'wallpaper-card', title: '车机壁纸' },
+  ota: { hash: '#car-ota', card: 'firmware-card', title: 'OTA 升级' },
+};
 
 const zeCarSheet = () => document.getElementById('ze-car-sheet');
 
-function zeCarOpenSheet(focus) {
-  const sheet = zeCarSheet();
+/**
+ * 面板里三块卡片是**平铺注入**到 body 的（不套外层 div：卡片里若有未闭合标签，
+ * 会把后面的 dialog 吞进容器里，踩过）。这里在运行时把它们搬进全屏 sheet，
+ * dialog 留在 body 级。
+ */
+function zeCarEnsureSheet() {
+  let sheet = document.getElementById('ze-car-sheet');
+  if (sheet) return sheet;
+  const cards = ['firmware-card', 'wallpaper-card', 'settings-card']
+    .map((id) => document.getElementById(id))
+    .filter(Boolean);
+  if (!cards.length) return null;
+  sheet = document.createElement('div');
+  sheet.id = 'ze-car-sheet';
+  sheet.hidden = true;
+  sheet.innerHTML = `
+    <div class="ze-car-head">
+      <h2>车机工具</h2>
+      <span class="ze-car-hint">壁纸 / OTA</span>
+      <button class="ze-car-close" id="ze-car-close" type="button">关闭</button>
+    </div>
+    <div class="ze-car-scroll"></div>`;
+  document.body.appendChild(sheet);
+  const scroll = sheet.querySelector('.ze-car-scroll');
+  for (const card of cards) scroll.appendChild(card);
+  return sheet;
+}
+
+function zeCarRouteFromHash() {
+  const hash = location.hash;
+  const entry = Object.entries(ZE_ROUTES).find(([, route]) => route.hash === hash);
+  return entry ? entry[0] : '';
+}
+
+function zeCarApplyRoute(routeName) {
+  const sheet = zeCarEnsureSheet();
+  if (!sheet) return;
+  const route = ZE_ROUTES[routeName];
+  // 面板里不展示「完整车辆设置」（面板自己就有设置页），只留壁纸 / OTA 两块。
+  for (const id of ['firmware-card', 'settings-card', 'wallpaper-card']) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.hidden = !(route && id === route.card);
+  }
+  sheet.querySelector('.ze-car-head h2').textContent = route ? route.title : '车机工具';
+}
+
+async function zeCarOpenRoute(routeName, { push = true } = {}) {
+  const route = ZE_ROUTES[routeName];
+  if (!route) return;
+  const sheet = zeCarEnsureSheet();
   if (!sheet) { toast('车机工具还没准备好，刷新页面再试'); return; }
+  if (push && location.hash !== route.hash) {
+    try { history.pushState(null, '', route.hash); } catch { /* file:// */ }
+  }
+  zeCarApplyRoute(routeName);
   sheet.hidden = false;
   document.body.classList.add('ze-car-lock');
-  if (!readPanelToken()) toast('还没登录：先在「我的」里登录，再回来看车机工具', 3200);
-  void (async () => {
-    try {
-      await loadVehiclesForPanel();
-      await carInitPanels();
-    } catch (error) {
-      toast(`读取失败：${error.message}`);
-    }
-    if (focus) zeCarFocus(focus);
-  })();
+  if (!readPanelToken()) toast('还没登录：先在「我的」里登录，再回来看', 3200);
+  try {
+    await loadVehiclesForPanel();
+    await carInitPanels();
+  } catch (error) {
+    toast(`读取失败：${error.message}`);
+  }
+  document.getElementById(route.card)?.scrollIntoView({ block: 'start' });
 }
 
 function zeCarCloseSheet() {
-  const sheet = zeCarSheet();
+  const sheet = zeCarEnsureSheet();
   if (!sheet) return;
   sheet.hidden = true;
   document.body.classList.remove('ze-car-lock');
-}
-
-function zeCarFocus(name) {
-  const target = { wallpaper: 'wallpaper-card', firmware: 'firmware-card', settings: 'settings-card' }[name] || name;
-  const el = document.getElementById(target);
-  if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  for (const button of document.querySelectorAll('.ze-car-tabs button')) {
-    button.setAttribute('aria-selected', String(button.dataset.zeFocus === name));
+  if (zeCarRouteFromHash()) {
+    try { history.pushState(null, '', location.pathname + location.search); } catch { /* ignore */ }
   }
 }
 
-/** 顶栏按钮：面板的 app.js 会重绘 topbar，靠 observer 补。 */
-function zeCarEnsureTopButton() {
-  const bar = document.getElementById('topbar');
-  if (!bar || bar.querySelector('.ze-car-topbtn')) return;
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'iconbtn ze-car-topbtn';
-  button.title = '车机壁纸 / OTA / 车辆设置';
-  button.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3.5" y="5" width="17" height="12" rx="2"/><path d="M7 20h10"/><circle cx="9" cy="9.5" r="1.3"/><path d="M5 15l4-3.5 3.5 3 2.5-2 4 3"/></svg>';
-  bar.appendChild(button);
-}
-
-/** 「车辆设置」页末尾追加的入口行。只在设置页出现（通过标题文案判断，避免绑到面板内部逻辑）。 */
+/** 「车辆设置」页底部：只留一行「车机壁纸」。 */
 function zeCarEnsureSettingsEntry() {
   const scroll = document.getElementById('scroll');
   const page = scroll?.querySelector('.page');
@@ -3023,55 +3235,69 @@ function zeCarEnsureSettingsEntry() {
   block.innerHTML = `
     <div class="section-title ze-car-entry-title"><span>车机工具</span><span class="line"></span></div>
     <section class="card group-card">
-      <button class="group-head ze-car-open" type="button" data-ze-focus="wallpaper">
-        <span class="gt">车机壁纸</span><span class="gc">列表 · 应用 · 改名 · 上传</span>
-        <span class="gv"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></span>
-      </button>
-    </section>
-    <section class="card group-card">
-      <button class="group-head ze-car-open" type="button" data-ze-focus="firmware">
-        <span class="gt">OTA 升级</span><span class="gc">版本 · 检查更新 · 固件包</span>
-        <span class="gv"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></span>
-      </button>
-    </section>
-    <section class="card group-card">
-      <button class="group-head ze-car-open" type="button" data-ze-focus="settings">
-        <span class="gt">完整车辆设置</span><span class="gc">官方 3.0.6 的全部磁贴</span>
+      <button class="group-head ze-car-open" type="button" data-ze-route="wallpaper">
+        <span class="gt">车机壁纸</span><span class="gc">整屏 + 速度卡 · 两步上传</span>
         <span class="gv"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></span>
       </button>
     </section>`;
   page.appendChild(block);
 }
 
+/** 「我的」页：在包含「固件版本」的卡片右上角挂一个「OTA 升级」按钮。 */
+function zeCarEnsureMineEntry() {
+  const scroll = document.getElementById('scroll');
+  const page = scroll?.querySelector('.page');
+  if (!page || page.querySelector('.ze-car-mine-btn')) return;
+  if (!page.textContent.includes('固件版本')) return;
+  const card = [...page.querySelectorAll('section.card')].find((section) => section.textContent.includes('固件版本'));
+  if (!card) return;
+  card.style.position = 'relative';
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'ze-car-mine-btn ze-car-open';
+  button.dataset.zeRoute = 'ota';
+  button.textContent = 'OTA 升级';
+  card.appendChild(button);
+}
+
 function zeCarSyncEntries() {
-  zeCarEnsureTopButton();
+  zeCarEnsureSheet();
   zeCarEnsureSettingsEntry();
+  zeCarEnsureMineEntry();
 }
 
 document.addEventListener('click', (event) => {
   const close = event.target.closest?.('#ze-car-close');
-  if (close) { zeCarCloseSheet(); return; }
-  const tab = event.target.closest?.('.ze-car-tabs button');
-  if (tab) { zeCarFocus(tab.dataset.zeFocus); return; }
-  const open = event.target.closest?.('.ze-car-open, .ze-car-topbtn');
+  if (close) { event.preventDefault(); zeCarCloseSheet(); return; }
+  const open = event.target.closest?.('.ze-car-open');
   if (open) {
     event.preventDefault();
-    zeCarOpenSheet(open.dataset.zeFocus || 'wallpaper');
+    event.stopPropagation();
+    void zeCarOpenRoute(open.dataset.zeRoute || 'wallpaper');
   }
 }, true);
 
-// 面板切 tab / 重绘会重建 #scroll 与 #topbar，这里补回入口（幂等）。
+window.addEventListener('hashchange', () => {
+  const route = zeCarRouteFromHash();
+  if (route) void zeCarOpenRoute(route, { push: false });
+  else zeCarCloseSheet();
+});
+
+// 面板切 tab / 重绘会重建 #scroll，这里补回入口。
 let zeCarSyncTimer = null;
 const zeCarObserver = new MutationObserver(() => {
   clearTimeout(zeCarSyncTimer);
   zeCarSyncTimer = setTimeout(zeCarSyncEntries, 60);
 });
-for (const target of [document.body]) {
-  zeCarObserver.observe(target, { childList: true, subtree: true });
-}
+zeCarObserver.observe(document.body, { childList: true, subtree: true });
 zeCarSyncEntries();
 setTimeout(zeCarSyncEntries, 800);
 setTimeout(zeCarSyncEntries, 2500);
+
+// 直接带 #car-wallpaper / #car-ota 打开时，等面板首屏渲染完再进对应视图。
+if (zeCarRouteFromHash()) {
+  setTimeout(() => { const route = zeCarRouteFromHash(); if (route) void zeCarOpenRoute(route, { push: false }); }, 900);
+}
 /* ==== ZEEHO_PANEL_CAR:ENTRY:END ==== */
 </script>
 <!-- ==== ZEEHO_PANEL_CAR:END ==== -->

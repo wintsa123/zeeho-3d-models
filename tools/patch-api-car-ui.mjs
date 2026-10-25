@@ -41,6 +41,7 @@ const MEDIA_EXPORTS = [
   'normalizeProgress', 'buildUseWallpaperBody', 'wallpaperImages', 'normalizeOtaInfo',
   'normalizeOtaFile', 'normalizeCheckVersion', 'normalizeOtaList', 'normalizeOtaRecord',
   'normalizeOtaStatus', 'findOtaFiles', 'maskWifiAddress', 'maskSignedUrl', 'formatBytes',
+  'parseWallpaperAreas', 'buildWallpaperContent',
 ];
 
 /** 把 ES module 源码改成 IIFE 内部代码：去掉 import/export 关键字与默认导出。 */

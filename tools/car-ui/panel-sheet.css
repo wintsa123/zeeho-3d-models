@@ -53,6 +53,16 @@ body.ze-car-lock { overflow: hidden; }
   opacity: 0; pointer-events: none; transition: opacity .18s, transform .18s; z-index: 120; max-width: 84vw;
 }
 .ze-car-toast.show { opacity: .96; transform: translate(-50%, 0); }
+/* 「我的 → 固件版本」卡片右上角的 OTA 入口 */
+.ze-car-mine-btn {
+  position: absolute; top: 10px; right: 12px; z-index: 2;
+  border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  font: inherit; font-size: 12px; font-weight: 550;
+  background: color-mix(in srgb, var(--md-sys-color-primary, #7457b8) 14%, transparent);
+  color: var(--md-sys-color-primary, #7457b8);
+}
+.ze-car-mine-btn:active { transform: scale(.97); }
+
 /* 面板里两个 dialog 没有 api.html 的样式，这里补最小集 */
 #car-dialog, #car-confirm {
   --surface: var(--bg-surface, #fffbfe);

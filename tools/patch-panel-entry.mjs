@@ -39,6 +39,7 @@ const MEDIA_EXPORTS = [
   'normalizeProgress', 'buildUseWallpaperBody', 'wallpaperImages', 'normalizeOtaInfo',
   'normalizeOtaFile', 'normalizeCheckVersion', 'normalizeOtaList', 'normalizeOtaRecord',
   'normalizeOtaStatus', 'findOtaFiles', 'maskWifiAddress', 'maskSignedUrl', 'formatBytes',
+  'parseWallpaperAreas', 'buildWallpaperContent',
 ];
 
 function toIifeBody(source) {
@@ -104,7 +105,10 @@ async function main() {
 
   const splitAt = cardsHtml.indexOf('ZEEHO_CAR_UI:SPLIT');
   if (splitAt < 0) throw new Error('api-car-ui.html 缺少 SPLIT 标记（卡片与弹层要分开注入）');
-  const cardsOnly = cardsHtml.slice(0, splitAt)
+  // 切在 SPLIT 注释的**开头**：直接切在 marker 文本会把 `<!--` 留成未闭合注释，
+  // 后面整段（含 dialog）都会被当注释吞掉（已踩）。
+  const cut = cardsHtml.lastIndexOf('<!--', splitAt);
+  const cardsOnly = cardsHtml.slice(0, cut < 0 ? splitAt : cut)
     .replace(/^\s*<!-- ==== ZEEHO_CAR_UI:HTML:BEGIN ==== -->\s*$/m, '')
     .trimEnd();
   const dialogs = cardsHtml.slice(cardsHtml.indexOf('<dialog id="car-dialog">')).trimEnd();
@@ -116,21 +120,7 @@ async function main() {
 ${css}
 </style>
 
-<div id="ze-car-sheet" hidden>
-  <div class="ze-car-head">
-    <h2>车机工具</h2>
-    <span class="ze-car-hint">壁纸 / OTA / 设置</span>
-    <button class="ze-car-close" id="ze-car-close" type="button">关闭</button>
-  </div>
-  <div class="ze-car-tabs" role="tablist">
-    <button type="button" data-ze-focus="wallpaper" aria-selected="true">车机壁纸</button>
-    <button type="button" data-ze-focus="firmware" aria-selected="false">固件 / OTA</button>
-    <button type="button" data-ze-focus="settings" aria-selected="false">车辆设置</button>
-  </div>
-  <div class="ze-car-scroll">
 ${cardsOnly}
-  </div>
-</div>
 
 ${dialogs}
 

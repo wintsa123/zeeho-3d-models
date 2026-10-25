@@ -531,9 +531,18 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 数据模型（`sdk/vehicle-settings.js`、`sdk/vehicle-media.js`）在构建时内联成 `__carModels`。
 上游重建 `api.html` 后重跑该脚本即可复原（幂等）。
 
-同一套 UI 也注入了面板 `index.html`（`tools/patch-panel-entry.mjs`）：顶栏「车机」按钮 +
-「车辆设置」页底部「车机工具」三行入口 → 全屏 sheet。面板里没有本页的 `request()`，
-由 `tools/car-ui/panel-host.js` 用面板自己的 `window.ZEEHO_SIGN` 补一层等价实现。
+同一套 UI 也注入了面板 `index.html`（`tools/patch-panel-entry.mjs`），但**分开路由**：
+
+| 路由 | 入口 | 视图 |
+| --- | --- | --- |
+| `#car-wallpaper` | 「车辆设置」页底部一行「车机壁纸」 | 只显示壁纸卡片 |
+| `#car-ota` | 「我的 → 固件版本」卡片右上角「OTA 升级」 | 只显示固件版本卡片 |
+
+面板里没有本页的 `request()`，由 `tools/car-ui/panel-host.js` 用面板自己的 `window.ZEEHO_SIGN` 补一层。
+
+壁纸是**两块图**（官方 `BigWallPaperEditActivity` + `SmallWallPaperEditActivity`）：
+`wallpaperContent` 里的 `WallpaperConfigItem { type, url, subjectUrl }`，`type=1` 整屏、`type=2` 速度卡；
+新建时按两步向导各传一张，应用时按记录整组下发。
 
 ### 8.5 环境变量
 

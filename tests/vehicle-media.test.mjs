@@ -28,6 +28,8 @@ import {
   maskWifiAddress,
   maskSignedUrl,
   formatBytes,
+  parseWallpaperAreas,
+  buildWallpaperContent,
 } from '../sdk/vehicle-media.js';
 
 const FIXTURE_DIR = new URL('./fixtures/media/', import.meta.url);
@@ -393,6 +395,8 @@ test('全部导出对 null / undefined / 空对象 / 字符串都不抛异常', 
     maskWifiAddress,
     maskSignedUrl,
     formatBytes,
+    parseWallpaperAreas,
+    buildWallpaperContent,
   ];
   for (const input of [null, undefined, {}, '', 0, []]) {
     for (const fn of normalizers) {
@@ -402,4 +406,42 @@ test('全部导出对 null / undefined / 空对象 / 字符串都不抛异常', 
     assert.doesNotThrow(() => normalizeOtaFile(input));
     assert.doesNotThrow(() => normalizeWallpaperPage(input));
   }
+});
+
+test('parseWallpaperAreas：按 type 区分整屏与速度卡', () => {
+  const wall = {
+    wallpaperContent: JSON.stringify([
+      { type: '1', url: 'https://cdn/main.png', subjectUrl: 'https://cdn/main-subject.png' },
+      { type: '2', url: 'https://cdn/speed.png' },
+    ]),
+  };
+  const areas = parseWallpaperAreas(wall);
+  assert.equal(areas.main.url, 'https://cdn/main.png');
+  assert.equal(areas.speedCard.url, 'https://cdn/speed.png');
+  assert.equal(areas.items.length, 2);
+});
+
+test('parseWallpaperAreas：没有 type 时按顺序当作 整屏/速度卡', () => {
+  const areas = parseWallpaperAreas({ wallpaperContent: JSON.stringify([{ url: 'https://a/1.png' }, { url: 'https://a/2.png' }]) });
+  assert.equal(areas.main.url, 'https://a/1.png');
+  assert.equal(areas.speedCard.url, 'https://a/2.png');
+  const single = parseWallpaperAreas({ wallpaperContent: JSON.stringify([{ url: 'https://a/only.png' }]) });
+  assert.equal(single.main.url, 'https://a/only.png');
+  assert.equal(single.speedCard, null);
+});
+
+test('parseWallpaperAreas：对象形态 / 空值都容错', () => {
+  assert.equal(parseWallpaperAreas(null).main, null);
+  assert.equal(parseWallpaperAreas({}).main, null);
+  const obj = parseWallpaperAreas({ wallpaperContent: { imageUrl: 'https://a/x.png' } });
+  assert.equal(obj.main.url, 'https://a/x.png');
+});
+
+test('buildWallpaperContent：两块图的 type 与顺序', () => {
+  const two = JSON.parse(buildWallpaperContent({ mainUrl: 'https://a/main.png', speedCardUrl: 'https://a/speed.png' }));
+  assert.deepEqual(two.map((item) => item.type), ['1', '2']);
+  assert.deepEqual(two.map((item) => item.url), ['https://a/main.png', 'https://a/speed.png']);
+  const one = JSON.parse(buildWallpaperContent({ mainUrl: 'https://a/only.png' }));
+  assert.equal(one.length, 1);
+  assert.equal(one[0].type, '1');
 });
