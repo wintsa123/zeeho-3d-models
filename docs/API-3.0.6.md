@@ -299,7 +299,7 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 | GET | `ota/redPointType` | query | 红点类型 | — |
 
 > 这些端点来自 `out/api_inventory.csv`（从 3.0.6 客户端 dex 提取的 534 条 Retrofit 清单），
-> 路径存在但**参数与返回未逐个验证**；`car.html` 只把只读的几个挂到了界面上，写操作留了确认步骤。
+> 路径存在但**参数与返回未逐个验证**；`api.html` 的车辆工具区块只把只读的几个挂到界面上，写操作留了确认步骤。
 
 ### 5.5 消息（`mine:`）
 
@@ -401,7 +401,7 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 | GET | `useWallpaperProgress/{recordId}` | path: recordId | 下发进度；recordId 不是壁纸 id，未验证 |
 | POST | `useWallpaper` | body：id / vinNo 等 | 写操作：下发壁纸到车机，未执行 |
 | DELETE | `deleteWallpaperV2/{id}` | path: id | 写操作：删壁纸，未执行 |
-| PUT / POST | `update/{id}` | path: id；body：壁纸信息（`wallpaperName` 必填） | 写操作：修改壁纸信息，未执行。**方法有分歧**：早期抓包文档记 PUT，3.0.6 客户端清单（`out/api_inventory.csv`）记 POST；`car.html` 默认 POST，表单里可切 PUT |
+| PUT / POST | `update/{id}` | path: id；body：壁纸信息（`wallpaperName` 必填） | 写操作：修改壁纸信息，未执行。**方法有分歧**：早期抓包文档记 PUT，3.0.6 客户端清单（`out/api_inventory.csv`）记 POST；页面上默认 POST，可切 PUT |
 | POST | `save` | multipart 图片 | 写操作：上传自定义壁纸；调试台只发 JSON，文件字段未验证 |
 | POST | `bluetooth/report` | body：vinNo / id / status | 写操作：蓝牙传输状态上报，未验证 |
 
@@ -416,7 +416,7 @@ token 失效 / 未带 token 时返回 `401`，响应体是 XML 而非 JSON：
 
 ### 5.12 车辆设置（`app:`，3.0.6；结构由服务端下发）
 
-`car.html` 的「车辆设置」页就是按这一节的契约做的，**不要在客户端硬编码 47 项清单**：
+`api.html` 车辆工具区块里的「车辆设置」就是按这一节的契约做的，**不要在客户端硬编码 47 项清单**：
 官方 App 自己也是拿服务端的能力表 + 当前值渲染的，硬编码会在换车型/换固件时直接错位。
 
 | 方法 | 路径 | 关键参数 | 返回要点 |
@@ -516,19 +516,20 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 - 登录态优先读 `localStorage['zeeho.token']`：先在 `index.html` 登录一次，回到调试台刷新即可复用。
 - 写操作需勾选确认（见 §7）。
 
-### 8.4 车辆工具页 `car.html`
+### 8.4 `api.html` 里的车辆工具区块
 
-`api.html` 是「逐个接口调」的调试台；`car.html` 是**给人用的**三页视图，同样复用面板登录态：
+车辆设置 / 车机壁纸 / 固件版本三块 UI 直接长在接口调试台页里（车况概览下方），不另建页面；
+复用本页已有的 `request()`（面板签名或自填凭据）与 `state.token` / `state.vin`。
 
-| Tab | 内容 | 主要接口 |
+| 区块 | 内容 | 主要接口 |
 | --- | --- | --- |
-| `#settings` | 车辆设置：官方磁贴 → 开关/下拉/滑杆，写入前二次确认；页内「车机壁纸」卡片提供**修改壁纸信息**入口 | `itemsV2` / `items` / `vehicleSetInfo` / `addVehicleSet` / `wallpaper/update/{id}` |
-| `#wallpaper` | 车机壁纸：内置壁纸（`subjectWallpaperConfig`）、我的壁纸、应用到车机、删除、上传 | `wallpaper/*` |
-| `#ota` | OTA：版本、固件包（`fileUrl` 打码）、任务/记录、红点内容、检查更新 | `ota/mmi/info/v2`、`ota/list`、`otaRecord`、`redPoint` |
+| 固件版本 | 版本、升级状态、`fileInfo`（地址打码）；检查更新在卡片右上角 | `ota/mmi/info/v2`、`checkVersion`、`upstatus` |
+| 车辆设置 | `itemsV2` 磁贴 → 开关/下拉/滑杆；写前二次确认；底部有壁纸入口（修改壁纸信息等） | `vehicleSet/itemsV2`、`items`、`vehicleSetInfo`、`addVehicleSet` |
+| 车机壁纸 | 内置/我的壁纸、应用（轮询进度）、删除、改名、上传 | `vehicle/wallpaper/*` |
 
-- 签名走 `sdk/bridge.js`：面板模式借用同目录 `index.html` 的 `ZEEHO_SIGN` / `API.call`，自填模式用 `sdk/zeeho-api.js`。
-- 入口：`api.html` 顶栏「车辆工具」、面板 `index.html` 右下角悬浮 chip（由 `tools/patch-panel-entry.mjs` 注入）。
-- 数据模型在 `sdk/vehicle-settings.js`（设置）与 `sdk/vehicle-media.js`（壁纸/OTA），都有离线单测。
+实现方式：区块的 CSS/HTML/JS 在 `tools/car-ui/`，由 `tools/patch-api-car-ui.mjs` 拼进 `api.html`，
+数据模型（`sdk/vehicle-settings.js`、`sdk/vehicle-media.js`）在构建时内联成 `__carModels`。
+上游重建 `api.html` 后重跑该脚本即可复原（幂等）。面板入口由 `tools/patch-panel-entry.mjs` 注入。
 
 ### 8.5 环境变量
 

@@ -3,7 +3,7 @@
 极核（Zeeho）车型的 **3D 车模库 + 极核面板网页产物与发布物**。
 
 本仓库放**静态资源、发布产物**，以及 `sdk/` + `tools/` 里一小套可读的接口工具
-（`index.html` 是混淆构建产物；`api.html` / `car.html` 是可读源码）。不含任何 Android 工程源码
+（`index.html` 是混淆构建产物；`api.html` 是可读的单文件产物，车辆工具区块由本仓脚本注入）。不含任何 Android 工程源码
 （面板的网页源码与 Android 壳已随 2026-10-20 重构搬进私有工作区
 `E:\AI_Program\zeeho-unlocker\dashboard\`）。
 
@@ -15,18 +15,18 @@ manifest.webmanifest    PWA 清单
 sw.js                   service worker（断网可开）
 version.json            网页构建号（页面靠它发现新版本）
 vehicle-info.html       车辆信息页
-api.html                极核接口调试台（App 3.0.6 接口目录 + 车况/OTA）
-car.html                车辆工具：车辆设置 / 车机壁纸 / OTA（给人用的三页视图）
+api.html                极核接口调试台（App 3.0.6 接口目录 + 车况/OTA + 车辆设置/壁纸/固件三块 UI）
 sdk/
   zeeho-api.js          零依赖接口 SDK（签名 / 客户端 / 便捷方法）
   endpoints.js          接口目录元数据（面板 39 项 + 3.0.6 补充，共 69 项）
-  bridge.js             浏览器端面板签名桥（隐藏 iframe 借 index.html 的 ZEEHO_SIGN / API.call）
   vehicle-settings.js   车辆设置数据模型（itemsV2 磁贴 → 控件，addVehicleSet 写入体）
   vehicle-media.js      壁纸与 OTA 数据模型（列表/详情/进度/固件包，含打码）
 tools/zeeho-cli.mjs     命令行：登录 / 车况 / OTA 固件 / 车模导入
+tools/patch-api-car-ui.mjs   把车辆工具区块注入 api.html（幂等，上游重建 api.html 后重跑）
+tools/car-ui/               车辆工具区块的 CSS / HTML / JS 源（被上面的脚本拼进 api.html）
 tools/patch-panel-entry.mjs  给面板 index.html 注入「壁纸 / OTA / 设置」入口（可重放）
 docs/API-3.0.6.md       接口文档（签名、端点、错误码、坑位）
-tests/                  离线测试（签名 KAT、bridge、设置/壁纸/OTA 模型共 58 例）
+tests/                  离线测试（签名 KAT + 设置/壁纸/OTA 模型，共 50 例）
 icons/                  PWA 图标
 art/                    页面用到的静态图
 models/                 .glb 车模文件
@@ -44,8 +44,10 @@ app/
 2. 在 `dashboard/app-shell` 下构建 APK：
    `./gradlew :webnext:exportApk`，产物直接写到这里（`app/zeehowebnext.apk`）；
 3. 改 `app/version.json` 的 `versionCode/versionName`，与网页产物一起提交推送；
-4. **面板入口要重放**：`index.html` 每被上游重建一次，右下角「壁纸 / OTA / 设置」入口就会丢，
-   提交前跑一次 `node tools/patch-panel-entry.mjs`（幂等；`--check` 只检查不写）。
+4. **两处入口/区块要重放**（上游每次 release 都会覆盖这两个产物，提交前各跑一次，都幂等）：
+   - `node tools/patch-api-car-ui.mjs` —— 把车辆设置 / 壁纸 / 固件 三块 UI 注入 `api.html`
+     （数据模型从 `sdk/vehicle-settings.js`、`sdk/vehicle-media.js` 内联进去，所以改了模型也要重跑）；
+   - `node tools/patch-panel-entry.mjs` —— 给面板右下角加「壁纸 / OTA / 设置」入口（跳 `api.html`）。
 
 固定地址（不要改）：
 
@@ -53,32 +55,26 @@ app/
 - APK：<https://lswlc33.github.io/zeeho-3d-models/app/zeehowebnext.apk>
 - APK 清单：<https://lswlc33.github.io/zeeho-3d-models/app/version.json>
 
-## 车辆工具 car.html（设置 / 壁纸 / OTA）
+## 车辆工具（内嵌在 api.html 里）
 
-<https://lswlc33.github.io/zeeho-3d-models/car.html>
+<https://lswlc33.github.io/zeeho-3d-models/api.html>
 
-三个入口，手机和桌面都能用，复用面板登录态（先在面板登录一次，或粘贴 token）：
+不新建页面：车辆三块功能直接长在调试台页里（车况概览下方），复用同一套登录态与面板签名：
 
-| 页面 | 做什么 | 依据 |
+| 区块 | 内容 | 主要接口 |
 | --- | --- | --- |
-| `car.html#settings` | 车辆设置：官方 App 的磁贴主页 → 开关 / 下拉 / 滑杆，写入前必须勾选确认；页内还有「车机壁纸」卡片（打开壁纸页 / **修改壁纸信息** / 上传） | 服务端 `itemsV2` 的 9 行 14 磁贴 + `vehicleSetInfo` 当前值 |
-| `car.html#wallpaper` | 车机壁纸：内置壁纸、我的壁纸（预览图）、应用到车机并轮询下发进度、删除、上传 | `vehicle/homePageV2` 的 `subjectWallpaperConfig` + `wallpaper/*` |
-| `car.html#ota` | OTA：仪表/App 版本（**「检查更新」在固件版本卡片右上角**）、`fileInfo` 固件包（地址打码）、任务列表/升级记录、红点内容 | `ota/mmi/info/v2`、`ota/list`、`otaRecord`、`red-point/content`、`checkVersion` |
+| 固件版本 | 仪表/App 版本、升级状态、`fileInfo` 固件包（地址打码）；**「检查更新」在卡片右上角** | `ota/mmi/info/v2`、`checkVersion` |
+| 车辆设置 | 按服务端 `itemsV2` 的 9 行 14 磁贴渲染（+「其他设置项」兜底），开关/下拉/滑杆，写前二次确认；卡片底部有 **打开壁纸 / 修改壁纸信息 / 上传新壁纸** | `vehicleSet/itemsV2`、`items`、`vehicleSetInfo`、`addVehicleSet` |
+| 车机壁纸 | 内置壁纸、我的壁纸预览、应用（含下发进度）、删除、改名字、上传 | `vehicle/wallpaper/*` |
 
-入口在哪：
+入口：面板 `index.html` 右下角「🛠 壁纸 / OTA / 设置」跳到 `api.html`；调试台顶栏也有「车辆工具」。
+两个入口文件都是上游产物，靠 `tools/` 下的两个脚本注入/重放（见发布流程第 4 步）。
 
-- 面板 `index.html` 右下角（悬浮在底部 tabbar 上方）「🛠 壁纸 / OTA / 设置」——由
-  `tools/patch-panel-entry.mjs` 注入，上游重建面板后要重跑；
-- 调试台 `api.html` 顶栏「车辆工具」，以及车况概览里的「车机壁纸 / 车辆设置」快捷按钮。
+未验证、需要真机确认的点（页面上也都写了）：
 
-未验证、需要真机确认的点（都写在页面的提示里）：
-
-- `addVehicleSet` 的 `flag` / `message` 语义；`serviceCode` 需要服务端下发（`blueToothServiceCode`）。
-- 上传壁纸的 multipart 字段名与「签名体」官方没公开，本页按 `file` 字段 + 空 body 签名猜。
-- `checkVersion` 只回 `true/false`，包地址只在 `ota/mmi/info/v2` 的 `fileInfo` 里。
-
-> 车辆设置的写入是**会改车**的：所有写操作都会弹二次确认并显示将要发送的 JSON。
-> 数据模型（`sdk/vehicle-settings.js`、`sdk/vehicle-media.js`）是纯函数，可离线测试。
+- `addVehicleSet` 的 `flag` / `message` 语义；没有 `serviceCode` 的项下发不了；
+- 上传壁纸的 multipart 字段名与签名体官方没公开（按 `file` + 空 body 试）；
+- `wallpaper/update/{id}` 方法有分歧：3.0.6 客户端清单写 POST，早期抓包文档写 PUT（页面上可切）。
 
 ## 接口调试台（App 3.0.6）
 

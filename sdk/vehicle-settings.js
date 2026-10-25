@@ -15,7 +15,7 @@
  *   chargePowerOptions    GET .../vehicleSet/chargePower/options
  *                         充电功率枚举，key 是瓦数、value 是下发值。
  *
- * 本模块是纯函数：不碰 DOM、不发网络、不引依赖，方便 car.html 与单测共用。
+ * 本模块是纯函数：不碰 DOM、不发网络、不引依赖，方便 api.html 车辆工具区块（内联）与单测共用。
  *
  * ---------------------------------------------------------------------------
  * 两份数据对不上的地方（都在代码里做了兜底，见 CODE_ALIAS / STATE_KEY_ALIAS）：

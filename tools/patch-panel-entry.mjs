@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * 给面板 index.html 注入「车机壁纸 / OTA / 车辆设置」入口。
+ * 给面板 index.html 注入「车机壁纸 / OTA / 车辆设置」入口（跳 api.html 的对应区块）。
  *
  * 为什么需要这个脚本：index.html 是 dashboard/ 私有工作区的**构建产物**（混淆 + 自包含），
  * 上游每次 release 都会整份覆盖。直接手改会在下一次同步里丢掉，所以入口以「可重放的注入块」形式维护：
@@ -46,13 +46,13 @@ const BLOCK = `
 </style>
 <script id="ze-panel-entry-script">
 (() => {
-  const HREF = './car.html';
+  const HREF = './api.html';
   const make = () => {
     const link = document.createElement('a');
     link.className = 'ze-panel-entry';
     link.href = HREF;
     link.innerHTML = '<span aria-hidden="true">🛠</span><b>壁纸 / OTA / 设置</b>';
-    link.title = '车机壁纸、OTA 升级、车辆设置（App 3.0.6）';
+    link.title = '车机壁纸、OTA 升级、车辆设置（App 3.0.6，在接口调试台页内）';
     return link;
   };
   const mount = () => {
