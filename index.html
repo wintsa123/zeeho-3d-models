@@ -2475,7 +2475,7 @@ async function loadVehiclesForPanel() {
 /* 车辆工具：固件 / 车辆设置 / 车机壁纸。
    —— 复用本页已有的 request()（面板签名 + 自填凭据两条路）与状态（state.token / state.vin / state.uid），
       不另外加载面板 iframe，也不引入任何网络依赖。
-   —— 数据模型来自 sdk/vehicle-settings.js 与 sdk/vehicle-media.js（由 tools/patch-api-car-ui.mjs 内联到 __carModels）。 */
+   —— 数据模型来自 sdk/vehicle-settings.js 与 sdk/vehicle-media.js（由 tools/patch-panel-entry.mjs 内联到 __carModels）。 */
 
 const CAR_MODELS = __carModels;
 const {
@@ -3121,9 +3121,8 @@ carOn('cc-ok', 'click', async () => {
 carOn('vin-select', 'change', () => {
   void carInitPanels();
 });
-// api.html：boot() 在文件末尾调用，等它把 token/vin 填好后再拉三块数据。
-// 面板页（index.html）里这三块默认藏在 sheet 里，打开时由 panel-sheet.js 显式调用，
-// 所以这里判断一下：有 #ze-car-sheet 且它还是 hidden 就什么都不做，避免进首页就打一堆接口。
+// 面板页（index.html）里这三块默认藏在 sheet 里，打开时由 panel-sheet.js 显式调用；
+// 这里只在没有 #ze-car-sheet 的宿主（例如单独调试页）里自动加载一次，避免进首页就打一堆接口。
 setTimeout(() => {
   const sheet = document.getElementById('ze-car-sheet');
   if (sheet && sheet.hidden) return;

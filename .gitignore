@@ -9,3 +9,6 @@ node_modules/
 # 本地接口凭据 / token（绝不入库）
 config.local.json
 .zeeho_token.json
+
+# 本地联调用的 mock 页（tools 生成，不入库）
+_mock-*.html

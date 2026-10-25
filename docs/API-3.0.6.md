@@ -516,29 +516,18 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 - 登录态优先读 `localStorage['zeeho.token']`：先在 `index.html` 登录一次，回到调试台刷新即可复用。
 - 写操作需勾选确认（见 §7）。
 
-### 8.4 `api.html` 里的车辆工具区块
+### 8.4 面板页的车辆工具（车辆设置 / 车机壁纸 / OTA）
 
-车辆设置 / 车机壁纸 / 固件版本三块 UI 直接长在接口调试台页里（车况概览下方），不另建页面；
-复用本页已有的 `request()`（面板签名或自填凭据）与 `state.token` / `state.vin`。
-
-| 区块 | 内容 | 主要接口 |
-| --- | --- | --- |
-| 固件版本 | 版本、升级状态、`fileInfo`（地址打码）；检查更新在卡片右上角 | `ota/mmi/info/v2`、`checkVersion`、`upstatus` |
-| 车辆设置 | `itemsV2` 磁贴 → 开关/下拉/滑杆；写前二次确认；底部有壁纸入口（修改壁纸信息等） | `vehicleSet/itemsV2`、`items`、`vehicleSetInfo`、`addVehicleSet` |
-| 车机壁纸 | 内置/我的壁纸、应用（轮询进度）、删除、改名、上传 | `vehicle/wallpaper/*` |
-
-实现方式：区块的 CSS/HTML/JS 在 `tools/car-ui/`，由 `tools/patch-api-car-ui.mjs` 拼进 `api.html`，
-数据模型（`sdk/vehicle-settings.js`、`sdk/vehicle-media.js`）在构建时内联成 `__carModels`。
-上游重建 `api.html` 后重跑该脚本即可复原（幂等）。
-
-同一套 UI 也注入了面板 `index.html`（`tools/patch-panel-entry.mjs`），但**分开路由**：
+三块 UI 只注入**面板 `index.html`**（`tools/patch-panel-entry.mjs`，幂等），调试台 `api.html` 保持上游原样。
+入口分开路由：
 
 | 路由 | 入口 | 视图 |
 | --- | --- | --- |
 | `#car-wallpaper` | 「车辆设置」页底部一行「车机壁纸」 | 只显示壁纸卡片 |
 | `#car-ota` | 「我的 → 固件版本」卡片右上角「OTA 升级」 | 只显示固件版本卡片 |
 
-面板里没有本页的 `request()`，由 `tools/car-ui/panel-host.js` 用面板自己的 `window.ZEEHO_SIGN` 补一层。
+面板里没有调试台的 `request()`，由 `tools/car-ui/panel-host.js` 用面板自己的 `window.ZEEHO_SIGN`
+补一层签名 + fetch；数据模型（`sdk/vehicle-settings.js`、`sdk/vehicle-media.js`）在注入时内联成 `__carModels`。
 
 壁纸是**两块图**（官方 `BigWallPaperEditActivity` + `SmallWallPaperEditActivity`）：
 `wallpaperContent` 里的 `WallpaperConfigItem { type, url, subjectUrl }`，`type=1` 整屏、`type=2` 速度卡；
