@@ -20,3 +20,22 @@ icons/                  图标资源
 4. 第三方模型请在 `note` 中注明作者、协议和原始链接。
 
 提交推送后，jsDelivr 通常会在 15 分钟内刷新。
+
+## 面板页的车辆工具（车辆设置 / 车机壁纸 / OTA）
+
+三块功能只挂在**面板 `index.html`**，调试台 `api.html` 保持上游原样。入口分开路由：
+
+| 路由 | 入口 | 视图 |
+| --- | --- | --- |
+| `#car-wallpaper` | 「车辆设置」页底部一行「车机壁纸」 | 只显示壁纸卡片 |
+| `#car-ota` | 「我的 → 固件版本」卡片右上角「OTA 升级」 | 只显示固件版本卡片 |
+
+- 固件版本：仪表/App 版本、升级状态、`fileInfo` 固件包（地址打码）；「检查更新」在卡片右上角；
+- 车辆设置：服务端 `itemsV2` 的 9 行 14 磁贴（+「其他设置项」兜底），开关/下拉/滑杆写入
+  `vehicleSet/addVehicleSet`，写前二次确认；
+- 车机壁纸：整屏 + 中间速度卡**两步**（官方 `BigWallPaperEditActivity` / `SmallWallPaperEditActivity`），
+  详情分块预览，新建向导两步各传一张（`wallpaper/save` 两次 multipart，`type=1/2`）。
+
+实现：`tools/patch-panel-entry.mjs` 幂等注入 `index.html`（卡片与弹窗平铺注入、运行时再搬进 sheet），
+UI 源码在 `tools/car-ui/`，数据模型在注入时内联成 `__carModels`；
+面板侧请求由 `tools/car-ui/panel-host.js` 借 `window.ZEEHO_SIGN` 补一层。离线测试：`npm test`。
