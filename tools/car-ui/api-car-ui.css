@@ -70,6 +70,16 @@
 .car-kv dt { color: var(--ink-faint); }
 .car-kv dd { margin: 0; word-break: break-all; }
 
+/* 卡片头在窄屏容易把标题挤成两行：副标题省略、标题不换行 */
+#firmware-card .card-head h2, #settings-card .card-head h2, #wallpaper-card .card-head h2 { white-space: nowrap; }
+#firmware-card .card-head .sub, #settings-card .card-head .sub, #wallpaper-card .card-head .sub {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (max-width: 520px) {
+  #firmware-card .card-head, #settings-card .card-head, #wallpaper-card .card-head { flex-wrap: wrap; row-gap: 6px; }
+  #firmware-card .card-head .top-actions, #settings-card .card-head .top-actions, #wallpaper-card .card-head .top-actions { margin-left: auto; }
+}
+
 @media (max-width: 560px) {
   .car-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
   .car-walls { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }

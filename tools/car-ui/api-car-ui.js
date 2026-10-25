@@ -503,25 +503,31 @@ async function carInitPanels() {
   await Promise.allSettled([carLoadFirmware(), carLoadSettings(), carLoadWallpaper()]);
 }
 
-$('btn-ota-check').addEventListener('click', () => { void carCheckOta(); });
-$('btn-cs-refresh').addEventListener('click', async () => { await carLoadSettings(); toast('设置已刷新'); });
-$('btn-wp-refresh').addEventListener('click', async () => { await carLoadWallpaper(); toast('壁纸已刷新'); });
-$('btn-open-walls').addEventListener('click', () => $('wallpaper-card').scrollIntoView({ behavior: 'smooth', block: 'start' }));
-$('btn-wall-edit').addEventListener('click', () => {
+/** 同一套 UI 也会跑在面板页里（那里没有 api.html 的 #vin-select 等元素），所以逐个判空。 */
+function carOn(id, event, handler) {
+  const el = $(id);
+  if (el) el.addEventListener(event, handler);
+}
+
+carOn('btn-ota-check', 'click', () => { void carCheckOta(); });
+carOn('btn-cs-refresh', 'click', async () => { await carLoadSettings(); toast('设置已刷新'); });
+carOn('btn-wp-refresh', 'click', async () => { await carLoadWallpaper(); toast('壁纸已刷新'); });
+carOn('btn-open-walls', 'click', () => $('wallpaper-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+carOn('btn-wall-edit', 'click', () => {
   const wall = (carState.walls || [])[0];
   if (!wall) { toast('还没有壁纸，先上传一张'); return; }
   carRenameWallpaper(wall);
 });
-$('btn-wall-upload').addEventListener('click', () => $('wp-file').click());
-$('wp-file').addEventListener('change', (event) => {
+carOn('btn-wall-upload', 'click', () => $('wp-file')?.click());
+carOn('wp-file', 'change', (event) => {
   const file = event.target.files?.[0];
   event.target.value = '';
   void carUploadWallpaper(file);
 });
-$('cc-check').addEventListener('change', (event) => { $('cc-ok').disabled = !event.target.checked; });
-$('cc-ok').addEventListener('click', async () => {
+carOn('cc-check', 'change', (event) => { $('cc-ok').disabled = !event.target.checked; });
+carOn('cc-ok', 'click', async () => {
   const run = carConfirmRun;
-  $('car-confirm').close();
+  $('car-confirm')?.close();
   carConfirmRun = null;
   if (!run) return;
   try {
@@ -530,8 +536,14 @@ $('cc-ok').addEventListener('click', async () => {
     toast(`失败：${error.message}`, 3600);
   }
 });
-$('vin-select').addEventListener('change', () => {
+carOn('vin-select', 'change', () => {
   void carInitPanels();
 });
-// boot() 在文件末尾调用；这里等它把 token/vin 填好后再拉三个面板。
-setTimeout(() => { void carInitPanels(); }, 1200);
+// api.html：boot() 在文件末尾调用，等它把 token/vin 填好后再拉三块数据。
+// 面板页（index.html）里这三块默认藏在 sheet 里，打开时由 panel-sheet.js 显式调用，
+// 所以这里判断一下：有 #ze-car-sheet 且它还是 hidden 就什么都不做，避免进首页就打一堆接口。
+setTimeout(() => {
+  const sheet = document.getElementById('ze-car-sheet');
+  if (sheet && sheet.hidden) return;
+  void carInitPanels();
+}, 1200);

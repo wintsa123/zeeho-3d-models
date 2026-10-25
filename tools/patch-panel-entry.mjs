@@ -1,109 +1,157 @@
 #!/usr/bin/env node
 /**
- * 给面板 index.html 注入「车机壁纸 / OTA / 车辆设置」入口（跳 api.html 的对应区块）。
+ * 给面板 index.html 注入「车机工具」（车机壁纸 / OTA / 车辆设置）。
  *
- * 为什么需要这个脚本：index.html 是 dashboard/ 私有工作区的**构建产物**（混淆 + 自包含），
- * 上游每次 release 都会整份覆盖。直接手改会在下一次同步里丢掉，所以入口以「可重放的注入块」形式维护：
- *   同步上游后跑一次 `node tools/patch-panel-entry.mjs` 即可复原。
+ * 为什么是注入：index.html 是 dashboard 的混淆构建产物，上游每次 release 整份覆盖，
+ * 所以入口以一个可重放的块维护（幂等：已存在就先按标记剥掉再插入）。
  *
- * 注入的内容（幂等，靠 ZEEHO_PANEL_ENTRY 标记判断）：
- *   1. 一段 <style>：.ze-panel-entry，锚在 .phone 里、悬浮在底部 tabbar 上方；
- *   2. 一段 <script>：把 <a> 塞进 .phone（面板的 app.js 只重绘 topbar/scroll/tabbar，
- *      .phone 本身稳定，所以不跟框架抢 DOM），拿不到 .phone 就退化成 fixed 悬浮。
+ * 注入内容（全部塞在 </body> 前）：
+ *   1. <style>：panel-sheet.css（全屏 sheet + 入口样式）+ api-car-ui.css（三块卡片样式）；
+ *   2. HTML：全屏 sheet 外壳 + 三块卡片（来自 tools/car-ui/api-car-ui.html 的卡片段）
+ *      + 两个 dialog（同一文件 SPLIT 标记之后，必须放在 body 级，不能嵌在 sheet 里）；
+ *   3. <script type="module">：数据模型（sdk/ 内联）+ panel-host.js（借面板签名发请求）
+ *      + api-car-ui.js（三块 UI，与 api.html 共用同一份源码）+ panel-sheet.js（入口与开关）。
+ *
+ * 入口有两处：顶栏「车机」按钮（observer 补回）、「车辆设置」页末尾的「车机工具」卡片行。
  *
  * 用法：
  *   node tools/patch-panel-entry.mjs            # 就地注入 index.html
- *   node tools/patch-panel-entry.mjs --check    # 只检查，不写
+ *   node tools/patch-panel-entry.mjs --check    # 只检查
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
-const MARK = 'ZEEHO_PANEL_ENTRY';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const target = resolve(root, 'index.html');
+const uiDir = resolve(root, 'tools/car-ui');
 
-const BLOCK = `
-<!-- ==== ${MARK}：车机壁纸 / OTA / 车辆设置 入口（本 fork 追加；上游重构建后重跑 tools/patch-panel-entry.mjs） ==== -->
-<style id="ze-panel-entry-style">
-  .ze-panel-entry {
-    position: absolute; right: 12px;
-    bottom: calc(var(--tabbar-inset, 0px) + var(--sab, 0px) + 66px);
-    z-index: 8; display: inline-flex; align-items: center; gap: 6px;
-    padding: 7px 12px; border-radius: 999px; text-decoration: none;
-    font-size: 12px; line-height: 1; letter-spacing: .01em;
-    color: var(--md-sys-color-on-surface, #e9e4f0);
-    background: color-mix(in srgb, var(--md-sys-color-primary, #b9a3f0) 20%, var(--bg-surface, #1d1b22));
-    border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-    box-shadow: 0 6px 18px #0003;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .ze-panel-entry:active { transform: scale(.97); }
-  .ze-panel-entry b { font-weight: 600; }
-  @media (max-width: 420px) { .ze-panel-entry { font-size: 11.5px; padding: 6px 10px; } }
-  .ze-panel-entry.ze-floating { position: fixed; right: 14px; bottom: calc(88px + env(safe-area-inset-bottom)); }
-</style>
-<script id="ze-panel-entry-script">
-(() => {
-  const HREF = './api.html';
-  const make = () => {
-    const link = document.createElement('a');
-    link.className = 'ze-panel-entry';
-    link.href = HREF;
-    link.innerHTML = '<span aria-hidden="true">🛠</span><b>壁纸 / OTA / 设置</b>';
-    link.title = '车机壁纸、OTA 升级、车辆设置（App 3.0.6，在接口调试台页内）';
-    return link;
-  };
-  const mount = () => {
-    if (document.querySelector('.ze-panel-entry')) return true;
-    const host = document.querySelector('.phone') || document.body;
-    const link = make();
-    if (host === document.body) link.classList.add('ze-floating');
-    host.appendChild(link);
-    return true;
-  };
-  if (!mount()) {
-    // 面板的 app.js 是异步渲染 .phone 的，这里等到它出现；10 秒还没有就退化到 fixed。
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (mount() || Date.now() - started > 10000) {
-        clearInterval(timer);
-        mount();
-      }
-    }, 200);
-  }
-  // 面板切页会重绘 .scroll 里的一切，但 .phone 不重建；万一被清掉，observer 兜一次。
-  const observer = new MutationObserver(() => { if (!document.querySelector('.ze-panel-entry')) mount(); });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+const BEGIN = '<!-- ==== ZEEHO_PANEL_CAR:BEGIN ==== -->';
+const END = '<!-- ==== ZEEHO_PANEL_CAR:END ==== -->';
+
+const SETTINGS_EXPORTS = [
+  'CONTROL', 'deriveStateKey', 'deriveFunctionCode', 'buildSettingsModel',
+  'buildWriteBody', 'coerceValue', 'isDirty', 'summarize',
+];
+const MEDIA_EXPORTS = [
+  'parseJsonField', 'normalizeWallpaperPage', 'normalizeWallpaperDetail', 'wallpapersFromHome',
+  'normalizeProgress', 'buildUseWallpaperBody', 'wallpaperImages', 'normalizeOtaInfo',
+  'normalizeOtaFile', 'normalizeCheckVersion', 'normalizeOtaList', 'normalizeOtaRecord',
+  'normalizeOtaStatus', 'findOtaFiles', 'maskWifiAddress', 'maskSignedUrl', 'formatBytes',
+];
+
+function toIifeBody(source) {
+  return source
+    .replace(/^export\s+default\s*\{[\s\S]*?\n\};\s*$/m, '')
+    .replace(/^export\s+/gm, '')
+    .replace(/^import[\s\S]*?;\s*$/gm, '')
+    .trim();
+}
+
+function buildModels(settingsSource, mediaSource) {
+  return `/* ===== 内联数据模型（源文件：sdk/vehicle-settings.js、sdk/vehicle-media.js）===== */
+const __carModels = (() => {
+  const settings = (() => {
+${toIifeBody(settingsSource)}
+    return { ${SETTINGS_EXPORTS.join(', ')} };
+  })();
+  const media = (() => {
+${toIifeBody(mediaSource)}
+    return { ${MEDIA_EXPORTS.join(', ')} };
+  })();
+  return { ...settings, ...media };
 })();
-</script>
-<!-- ==== /${MARK} ==== -->
 `;
+}
+
+function stripBlock(html) {
+  let out = html;
+  for (let guard = 0; guard < 8; guard += 1) {
+    const start = out.indexOf(BEGIN);
+    if (start < 0) break;
+    const end = out.indexOf(END, start + BEGIN.length);
+    if (end < 0) break;
+    let from = start;
+    let to = end + END.length;
+    if (out[to] === '\n') to += 1;
+    if (out[from - 1] === '\n') from -= 1;
+    out = out.slice(0, from) + out.slice(to);
+  }
+  return out;
+}
 
 async function main() {
   const checkOnly = process.argv.includes('--check');
-  const html = await readFile(target, 'utf8');
-  if (html.includes(MARK)) {
-    console.log('index.html 已含入口块，无需注入。');
-    return;
-  }
-  if (!html.includes('</body>')) {
-    console.error('index.html 里找不到 </body>，结构变了，先人工看一下。');
-    process.exitCode = 1;
-    return;
-  }
+  const [htmlRaw, sheetCss, cardsCss, panelJs, hostJs, uiJs, cardsHtml, settingsSource, mediaSource] = await Promise.all([
+    readFile(target, 'utf8'),
+    readFile(resolve(uiDir, 'panel-sheet.css'), 'utf8'),
+    readFile(resolve(uiDir, 'api-car-ui.css'), 'utf8'),
+    readFile(resolve(uiDir, 'panel-sheet.js'), 'utf8'),
+    readFile(resolve(uiDir, 'panel-host.js'), 'utf8'),
+    readFile(resolve(uiDir, 'api-car-ui.js'), 'utf8'),
+    readFile(resolve(uiDir, 'api-car-ui.html'), 'utf8'),
+    readFile(resolve(root, 'sdk/vehicle-settings.js'), 'utf8'),
+    readFile(resolve(root, 'sdk/vehicle-media.js'), 'utf8'),
+  ]);
+
+  const already = htmlRaw.includes(BEGIN);
   if (checkOnly) {
-    console.log('index.html 缺少入口块（--check 不写文件）。');
-    process.exitCode = 2;
+    console.log(already ? 'index.html 已含车机工具注入块。' : 'index.html 缺少车机工具注入块。');
+    process.exitCode = already ? 0 : 2;
     return;
   }
-  const next = html.replace('</body>', `${BLOCK}</body>`);
+
+  const splitAt = cardsHtml.indexOf('ZEEHO_CAR_UI:SPLIT');
+  if (splitAt < 0) throw new Error('api-car-ui.html 缺少 SPLIT 标记（卡片与弹层要分开注入）');
+  const cardsOnly = cardsHtml.slice(0, splitAt)
+    .replace(/^\s*<!-- ==== ZEEHO_CAR_UI:HTML:BEGIN ==== -->\s*$/m, '')
+    .trimEnd();
+  const dialogs = cardsHtml.slice(cardsHtml.indexOf('<dialog id="car-dialog">')).trimEnd();
+
+  const models = buildModels(settingsSource, mediaSource);
+  const css = `${sheetCss.trim()}\n${cardsCss.trim()}`;
+  const block = `${BEGIN}
+<style id="ze-car-style">
+${css}
+</style>
+
+<div id="ze-car-sheet" hidden>
+  <div class="ze-car-head">
+    <h2>车机工具</h2>
+    <span class="ze-car-hint">壁纸 / OTA / 设置</span>
+    <button class="ze-car-close" id="ze-car-close" type="button">关闭</button>
+  </div>
+  <div class="ze-car-tabs" role="tablist">
+    <button type="button" data-ze-focus="wallpaper" aria-selected="true">车机壁纸</button>
+    <button type="button" data-ze-focus="firmware" aria-selected="false">固件 / OTA</button>
+    <button type="button" data-ze-focus="settings" aria-selected="false">车辆设置</button>
+  </div>
+  <div class="ze-car-scroll">
+${cardsOnly}
+  </div>
+</div>
+
+${dialogs}
+
+<script type="module">
+${models}
+${hostJs.trim()}
+${uiJs.trim()}
+${panelJs.trim()}
+</script>
+${END}
+`;
+
+  const baseline = stripBlock(htmlRaw);
+  if (!baseline.includes('</body>')) throw new Error('index.html 里找不到 </body>');
+  // 块前补一个换行，stripBlock 会按同样规则剥掉，保证重跑逐字节一致。
+  const next = baseline.replace('</body>', `\n${block}</body>`);
   await writeFile(target, next, 'utf8');
-  console.log(`已注入入口块：${target}`);
+  console.log(`${already ? '已更新' : '已注入'}车机工具注入块：${target}`);
 }
 
 main().catch((error) => {
-  console.error(error);
+  console.error(error.message || error);
   process.exitCode = 1;
 });

@@ -529,7 +529,11 @@ node tools/zeeho-cli.mjs call ota_info --query vinNo={VIN} --json    # 按端点
 
 实现方式：区块的 CSS/HTML/JS 在 `tools/car-ui/`，由 `tools/patch-api-car-ui.mjs` 拼进 `api.html`，
 数据模型（`sdk/vehicle-settings.js`、`sdk/vehicle-media.js`）在构建时内联成 `__carModels`。
-上游重建 `api.html` 后重跑该脚本即可复原（幂等）。面板入口由 `tools/patch-panel-entry.mjs` 注入。
+上游重建 `api.html` 后重跑该脚本即可复原（幂等）。
+
+同一套 UI 也注入了面板 `index.html`（`tools/patch-panel-entry.mjs`）：顶栏「车机」按钮 +
+「车辆设置」页底部「车机工具」三行入口 → 全屏 sheet。面板里没有本页的 `request()`，
+由 `tools/car-ui/panel-host.js` 用面板自己的 `window.ZEEHO_SIGN` 补一层等价实现。
 
 ### 8.5 环境变量
 

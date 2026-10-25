@@ -47,7 +47,8 @@ app/
 4. **两处入口/区块要重放**（上游每次 release 都会覆盖这两个产物，提交前各跑一次，都幂等）：
    - `node tools/patch-api-car-ui.mjs` —— 把车辆设置 / 壁纸 / 固件 三块 UI 注入 `api.html`
      （数据模型从 `sdk/vehicle-settings.js`、`sdk/vehicle-media.js` 内联进去，所以改了模型也要重跑）；
-   - `node tools/patch-panel-entry.mjs` —— 给面板右下角加「壁纸 / OTA / 设置」入口（跳 `api.html`）。
+   - `node tools/patch-panel-entry.mjs` —— 给面板注入车机工具（顶栏按钮 + 车辆设置页三行入口 + 全屏 sheet，
+     内含壁纸 / OTA / 设置三块，数据模型同样从 `sdk/` 内联）。
 
 固定地址（不要改）：
 
@@ -67,8 +68,13 @@ app/
 | 车辆设置 | 按服务端 `itemsV2` 的 9 行 14 磁贴渲染（+「其他设置项」兜底），开关/下拉/滑杆，写前二次确认；卡片底部有 **打开壁纸 / 修改壁纸信息 / 上传新壁纸** | `vehicleSet/itemsV2`、`items`、`vehicleSetInfo`、`addVehicleSet` |
 | 车机壁纸 | 内置壁纸、我的壁纸预览、应用（含下发进度）、删除、改名字、上传 | `vehicle/wallpaper/*` |
 
-入口：面板 `index.html` 右下角「🛠 壁纸 / OTA / 设置」跳到 `api.html`；调试台顶栏也有「车辆工具」。
-两个入口文件都是上游产物，靠 `tools/` 下的两个脚本注入/重放（见发布流程第 4 步）。
+入口（面板页 `index.html`，由 `tools/patch-panel-entry.mjs` 注入，见发布流程第 4 步）：
+
+- 顶栏右上角「车机」图标按钮（任何 tab 都在）；
+- 「车辆设置」页底部的 **车机工具** 三行：`车机壁纸` / `OTA 升级` / `完整车辆设置`；
+- 点开后是全屏 sheet（同样三块 UI），面板页里也直接能改壁纸、看 OTA，不用跳页面。
+
+调试台 `api.html` 里也有同样的三块（车况概览下方），两边共用一套 UI 源码。
 
 未验证、需要真机确认的点（页面上也都写了）：
 
