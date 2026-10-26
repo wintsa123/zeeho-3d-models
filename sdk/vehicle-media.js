@@ -47,6 +47,13 @@ function clampPercent(value) {
   return Math.min(100, Math.max(0, Math.round(num * 10) / 10));
 }
 
+/** 区间钳制；value 取不到就给区间下界（平移这类「默认居中」的场景由调用方先给 0）。 */
+function clampRange(value, min, max) {
+  const num = toNumber(value);
+  if (num == null) return min <= 0 && max >= 0 ? 0 : min;
+  return Math.min(max, Math.max(min, num));
+}
+
 const TRUE_WORDS = new Set(['1', 'true', 'yes', 'y', 'on', 'use', 'using', 'used', 'enable', 'enabled']);
 
 /** 服务端的布尔字段常见有 true / 1 / '1' / 'true' / 'Y' 多种写法。 */
@@ -428,6 +435,135 @@ export function buildWallpaperContent(options = {}) {
   if (mainUrl) items.push({ type: '1', url: mainUrl, subjectUrl: mainUrl });
   if (speedCardUrl) items.push({ type: '2', url: speedCardUrl, subjectUrl: speedCardUrl });
   return JSON.stringify(items);
+}
+
+/* ------------------- 本地定位（先拖拽调位置，点保存才上传） ------------------- */
+
+/**
+ * 官方 App 3.0.6 的顺序（「自定义仪表壁纸」→「仪表效果预览」）：
+ *   1. 选图只在本地，**不联网**；
+ *   2. 在预览里拖拽 / 双指缩放，把图挪到满意位置（原文：「双指放大/缩小可调整壁纸展示」）；
+ *   3. 点「保存」时才把**调好的那张**传上去（`wallpaper/save` multipart）。
+ * 面板没有原生手势层，所以裁切参数自己算：预览用百分比、导出用**同一份 transform** 画到 canvas，
+ * 保证「看到哪儿、传上去就是哪儿」。
+ *
+ * 坐标口径：单位是目标框（整屏 1024×600、速度卡按车型面板）的像素；
+ * `zoom` 是相对「覆盖适配（cover）」的倍数 —— zoom=1 时刚好铺满、四边无空白，
+ * 所以平移极限天然是 (drawW-boxW)/2，拖不出黑边。
+ */
+export const WALLPAPER_ZOOM_MIN = 1;
+export const WALLPAPER_ZOOM_MAX = 8;
+
+/** 覆盖适配所需的最小缩放：max(boxW/imgW, boxH/imgH)。 */
+export function wallpaperCoverScale(imgW, imgH, boxW, boxH) {
+  const w = toNumber(imgW);
+  const h = toNumber(imgH);
+  const bw = toNumber(boxW);
+  const bh = toNumber(boxH);
+  if (!(w > 0 && h > 0 && bw > 0 && bh > 0)) return 1;
+  return Math.max(bw / w, bh / h);
+}
+
+/** zoom 钳到 [1, 8]，非法值按 1。 */
+export function clampWallpaperZoom(value, max = WALLPAPER_ZOOM_MAX) {
+  const num = toNumber(value);
+  const top = toNumber(max);
+  const ceiling = top != null && top > WALLPAPER_ZOOM_MIN ? top : WALLPAPER_ZOOM_MAX;
+  if (num == null) return WALLPAPER_ZOOM_MIN;
+  return Math.min(ceiling, Math.max(WALLPAPER_ZOOM_MIN, Math.round(num * 1000) / 1000));
+}
+
+/**
+ * 「图片尺寸 + 目标框 + zoom + 平移」→ 绘制参数（框坐标系）。
+ * offsetX/offsetY 是图左上角坐标（可为负）；maxPanX/maxPanY 是可平移的极限。
+ */
+export function wallpaperFitTransform(options = {}) {
+  const imgW = toNumber(options?.imgW) || 0;
+  const imgH = toNumber(options?.imgH) || 0;
+  const boxW = toNumber(options?.boxW) || 0;
+  const boxH = toNumber(options?.boxH) || 0;
+  const zoom = clampWallpaperZoom(options?.zoom);
+  const ready = imgW > 0 && imgH > 0 && boxW > 0 && boxH > 0;
+  const safeBoxW = boxW > 0 ? boxW : 1;
+  const safeBoxH = boxH > 0 ? boxH : 1;
+  const scale = ready ? wallpaperCoverScale(imgW, imgH, boxW, boxH) * zoom : 1;
+  const drawW = ready ? imgW * scale : safeBoxW;
+  const drawH = ready ? imgH * scale : safeBoxH;
+  const maxPanX = Math.max(0, (drawW - safeBoxW) / 2);
+  const maxPanY = Math.max(0, (drawH - safeBoxH) / 2);
+  const panX = clampRange(toNumber(options?.panX), -maxPanX, maxPanX);
+  const panY = clampRange(toNumber(options?.panY), -maxPanY, maxPanY);
+  return {
+    ready,
+    zoom,
+    scale,
+    boxW: safeBoxW,
+    boxH: safeBoxH,
+    imgW: ready ? imgW : 0,
+    imgH: ready ? imgH : 0,
+    drawW,
+    drawH,
+    panX,
+    panY,
+    maxPanX,
+    maxPanY,
+    offsetX: (safeBoxW - drawW) / 2 + panX,
+    offsetY: (safeBoxH - drawH) / 2 + panY,
+  };
+}
+
+/** 同一份 transform → 预览层的 CSS 百分比（不依赖舞台像素，手机/桌面自适应）。 */
+export function wallpaperLayerStyle(transform) {
+  const boxW = toNumber(transform?.boxW) || 1;
+  const boxH = toNumber(transform?.boxH) || 1;
+  const drawW = toNumber(transform?.drawW);
+  const drawH = toNumber(transform?.drawH);
+  const pct = (value, base) => `${Number(((value / base) * 100).toFixed(4))}%`;
+  return {
+    left: pct(toNumber(transform?.offsetX) || 0, boxW),
+    top: pct(toNumber(transform?.offsetY) || 0, boxH),
+    width: pct(drawW > 0 ? drawW : boxW, boxW),
+    height: pct(drawH > 0 ? drawH : boxH, boxH),
+  };
+}
+
+/** 平移再钳一次（UI 每帧调；max 传 0 表示该方向不可动）。 */
+export function clampWallpaperPan(panX, panY, maxPanX, maxPanY) {
+  const mx = Math.abs(toNumber(maxPanX) || 0);
+  const my = Math.abs(toNumber(maxPanY) || 0);
+  return {
+    panX: clampRange(toNumber(panX), -mx, mx),
+    panY: clampRange(toNumber(panY), -my, my),
+  };
+}
+
+/**
+ * 速度卡是**竖长方形、居中**的一块固定区域（比例如下图，不给用户改）：
+ *   · 高 = 整屏高 × heightRatio（默认 0.86）
+ *   · 宽 = 高 × aspect（默认 1 / 1.9，即宽:高 ≈ 1:1.9）
+ * 等正式参数下来，只改调用处的 heightRatio / aspect 即可。
+ */
+export function wallpaperSpeedCardBox(mainBox, spec = {}) {
+  const mainW = toNumber(mainBox?.w) || 1024;
+  const mainH = toNumber(mainBox?.h) || 600;
+  const rawRatio = toNumber(spec?.heightRatio);
+  const rawAspect = toNumber(spec?.aspect);
+  const heightRatio = rawRatio == null ? 0.86 : clampRange(rawRatio, 0.1, 1);
+  const aspect = rawAspect == null || rawAspect <= 0 ? 1 / 1.9 : rawAspect;
+  const h = Math.max(1, Math.round(mainH * heightRatio));
+  const w = Math.max(1, Math.round(h * aspect));
+  return {
+    w,
+    h,
+    // 居中：左右、上下各留一半
+    left: Math.round((mainW - w) / 2),
+    top: Math.round((mainH - h) / 2),
+    // 相对整屏的百分比，预览层直接用
+    leftPct: Number((((mainW - w) / 2 / mainW) * 100).toFixed(4)),
+    topPct: Number((((mainH - h) / 2 / mainH) * 100).toFixed(4)),
+    widthPct: Number(((w / mainW) * 100).toFixed(4)),
+    heightPct: Number(((h / mainH) * 100).toFixed(4)),
+  };
 }
 
 /**

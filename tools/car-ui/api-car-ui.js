@@ -20,6 +20,11 @@ const {
   formatBytes: carFormatBytes,
   parseWallpaperAreas: carWallpaperAreas,
   buildWallpaperContent: carBuildWallpaperContent,
+  wallpaperFitTransform: carWallpaperFit,
+  wallpaperLayerStyle: carWallpaperLayerStyle,
+  clampWallpaperZoom: carWallpaperZoom,
+  clampWallpaperPan: carWallpaperClampPan,
+  wallpaperSpeedCardBox: carSpeedCardBox,
 } = CAR_MODELS;
 
 /** 目录里没有的端点（itemsV2 / 充电功率选项 / 通用写入），就地声明。 */
@@ -372,82 +377,365 @@ function carOpenWallpaper(id) {
   $('car-dialog').showModal();
 }
 
+/** 速度卡比例（固定，不给用户改；正式参数下来只改这两个数）。 */
+const CAR_SPEED_CARD_SPEC = { heightRatio: 0.86, aspect: 1 / 1.9 };
+
 /**
- * 官方壁纸是两步走：先整屏壁纸，再中间速度卡那一块（dex: BigWallPaperEditActivity / SmallWallPaperEditActivity）。
- * 这里做成两步向导，两步各选一张图；上传按两步各发一次 multipart（带 type=1 / type=2）。
- * 接口字段官方没公开 —— 页面上会显示实际发送的字段，失败时按提示改。
+ * 官方顺序：选图 → 本地拖拽/双指缩放调位置 → 点保存才上传。
+ * 面板做成两层视图（同一个弹窗内切换，避免 modal 套 modal）：
+ *   list    —— 两个缩略图（整屏 / 速度卡）+ 名称 + 「保存并上传」；
+ *   preview —— 点缩略图进来：拖拽 / 滚轮 / 双指缩放，点「完成」回列表。
+ * 两个预览的舞台都是整屏比例，区别只在：
+ *   · 整屏预览：只显示整屏图，速度卡不出现；
+ *   · 速度卡预览：整屏图当背景（不可拖动），中间那块竖长方形速度卡跟着手指动 / 缩放。
+ * 选图、拖动、缩放全程不发请求；只有「保存并上传」才按当前裁切导出 multipart。
  */
-function carCreateWallpaperWizard() {
-  const state2 = { step: 1, main: null, speed: null, name: '' };
-  const renderStep = () => {
-    const step = state2.step;
-    $('car-dialog-title').textContent = `新建壁纸（第 ${step}/2 步）`;
+function carCreateWallpaper() {
+  const meta = carState.wallsMeta || {};
+  const mainW = Number(meta.width) || 1024;
+  const mainH = Number(meta.height) || 600;
+  const speedGeo = carSpeedCardBox({ w: mainW, h: mainH }, CAR_SPEED_CARD_SPEC);
+  const editor = {
+    view: 'list',
+    editing: 'main',
+    name: '',
+    box: { main: { w: mainW, h: mainH }, speed: { w: speedGeo.w, h: speedGeo.h } },
+    layers: {
+      main: { file: null, img: null, url: '', zoom: 1, panX: 0, panY: 0 },
+      speed: { file: null, img: null, url: '', zoom: 1, panX: 0, panY: 0 },
+    },
+  };
+  let detachPreview = null;
+  let pendingArea = 'main';
+
+  /** 预览与导出共用这一份裁切参数。 */
+  const fitOf = (key) => carWallpaperFit({
+    imgW: editor.layers[key].img?.naturalWidth || 0,
+    imgH: editor.layers[key].img?.naturalHeight || 0,
+    boxW: editor.box[key].w,
+    boxH: editor.box[key].h,
+    zoom: editor.layers[key].zoom,
+    panX: editor.layers[key].panX,
+    panY: editor.layers[key].panY,
+  });
+
+  /* ---------------- list：两个缩略图 + 名称 ---------------- */
+  const renderList = () => {
+    if (detachPreview) { detachPreview(); detachPreview = null; }
+    $('car-dialog-title').textContent = '新建壁纸';
     $('car-dialog-body').innerHTML = `
-      <div class="hint" style="margin-bottom:8px">
-        ${step === 1 ? '整屏壁纸：仪表全屏铺满，官方推荐 1024×600。' : '速度卡：仪表中间那块速度卡片区域，尺寸按车型面板（AE5i 约 768×300）。'}
+      <div class="cw-grid" id="cw-grid">
+        <button class="cw-thumb" type="button" data-area="main">
+          <span class="cw-thumb-box"><img id="cw-thumb-main" alt="" draggable="false"></span>
+          <span class="cw-thumb-tag">整屏</span>
+        </button>
+        <button class="cw-thumb cw-thumb-speed" type="button" data-area="speed">
+          <span class="cw-thumb-box"><img id="cw-thumb-speed" alt="" draggable="false"></span>
+          <span class="cw-thumb-tag">速度卡</span>
+        </button>
       </div>
-      <div class="field">
-        <label for="cw-file">${step === 1 ? '选择整屏壁纸' : '选择速度卡图片'}</label>
-        <input id="cw-file" type="file" accept="image/*">
-      </div>
-      <div id="cw-preview" class="hint">${(step === 1 ? state2.main : state2.speed) ? ((step === 1 ? state2.main : state2.speed).name || '已选择') : '还没选文件'}</div>
-      <div class="field" style="margin-top:10px">
+      <div class="field" style="margin-top:14px">
         <label for="cw-name">壁纸名称</label>
-        <input id="cw-name" maxlength="24" value="${escapeHtml(state2.name)}" placeholder="例如：夜景">
+        <input id="cw-name" maxlength="24" value="${escapeHtml(editor.name)}" placeholder="例如：夜景">
       </div>
-      <p class="car-note">上传走 <span class="mono">wallpaper/save</span>（multipart）：字段
-        <span class="mono">file / wallpaperName / vinNo / type</span>（type=1 整屏、type=2 速度卡）。
-        另外会附一份 <span class="mono">wallpaperContent</span> 的两块配置。</p>`;
+      <div id="cw-export-box"></div>
+      <input id="cw-file" type="file" accept="image/*" hidden>`;
     $('car-dialog-foot').innerHTML = `
-      ${step === 2 ? '<button class="btn small" id="cw-prev" type="button">上一步</button>' : ''}
-      <button class="btn small primary" id="cw-next" type="button">${step === 1 ? '下一步' : '上传两张'}</button>`;
-    $('cw-name').addEventListener('input', () => { state2.name = $('cw-name').value; });
-    $('cw-file').addEventListener('change', (event) => {
-      const file = event.target.files?.[0] || null;
-      if (step === 1) state2.main = file; else state2.speed = file;
-      $('cw-preview').textContent = file ? `${file.name} · ${carFormatBytes(file.size)}` : '还没选文件';
+      <button class="btn small" id="cw-export" type="button">只看导出图</button>
+      <button class="btn small primary" id="cw-save" type="button">保存并上传</button>`;
+
+    const paintThumbs = () => {
+      for (const key of ['main', 'speed']) {
+        const layer = editor.layers[key];
+        const thumb = document.querySelector(`.cw-thumb[data-area="${key}"]`);
+        const img = $(`cw-thumb-${key}`);
+        thumb.classList.toggle('empty', !layer.url);
+        if (layer.url) img.src = layer.url;
+      }
+    };
+    paintThumbs();
+
+    $('cw-grid').addEventListener('click', (event) => {
+      const thumb = event.target.closest('[data-area]');
+      if (!thumb) return;
+      const area = thumb.dataset.area;
+      editor.name = $('cw-name')?.value || editor.name;
+      if (!editor.layers[area].url) { pendingArea = area; $('cw-file').click(); return; }
+      openPreview(area);
     });
-    if ($('cw-prev')) {
-      $('cw-prev').addEventListener('click', () => { state2.step = 1; renderStep(); });
-    }
-    $('cw-next').addEventListener('click', () => {
-      if (step === 1) {
-        if (!state2.main) { toast('先选一张整屏壁纸'); return; }
-        state2.step = 2;
-        renderStep();
+
+    $('cw-file').addEventListener('change', async (event) => {
+      const file = event.target.files?.[0] || null;
+      event.target.value = '';
+      if (!file) return;
+      if (!/^image\//.test(file.type)) { toast('这不是图片文件'); return; }
+      try {
+        const { img, url } = await carReadLocalImage(file);
+        const previous = editor.layers[pendingArea].url;
+        editor.layers[pendingArea] = { file, img, url, zoom: 1, panX: 0, panY: 0 };
+        if (previous && previous !== url) URL.revokeObjectURL(previous);
+        paintThumbs();
+        openPreview(pendingArea);
+      } catch (error) {
+        toast(`读图失败：${error.message}`);
+      }
+    });
+
+    $('cw-name').addEventListener('input', () => { editor.name = $('cw-name').value; });
+
+    $('cw-export').addEventListener('click', async () => {
+      if (!editor.layers.main.url) { toast('先选一张整屏壁纸'); return; }
+      const box = $('cw-export-box');
+      box.innerHTML = '<div class="cw-out"><span class="hint">导出中…</span></div>';
+      try {
+        const files = [await exportLayer('main'), await exportLayer('speed')].filter(Boolean);
+        box.innerHTML = files.map((file) => {
+          const href = URL.createObjectURL(file);
+          return `<div class="cw-out">
+            <img src="${href}" alt="${escapeHtml(file.name)}">
+            <div class="cw-out-txt"><b>${escapeHtml(file.name)}</b><small>${carFormatBytes(file.size)}</small></div>
+            <a class="btn small" download="${escapeHtml(file.name)}" href="${href}">下载</a>
+          </div>`;
+        }).join('');
+      } catch (error) {
+        box.innerHTML = '';
+        toast(`导出失败：${error.message}`);
+      }
+    });
+
+    $('cw-save').addEventListener('click', async () => {
+      if (!state.vin) { toast('还没有读到车'); return; }
+      if (!editor.layers.main.url) { toast('先选一张整屏壁纸'); return; }
+      editor.name = $('cw-name')?.value || editor.name;
+      try {
+        const mainFile = await exportLayer('main');
+        const speedFile = editor.layers.speed.url ? await exportLayer('speed') : null;
+        const name = (editor.name.trim() || editor.layers.main.file.name.replace(/\.[^.]+$/, '')).slice(0, 24);
+        $('car-dialog').close();
+        carUploadWallpaper({ mainFile, speedFile, name });
+      } catch (error) {
+        toast(`导出失败：${error.message}`);
+      }
+    });
+  };
+
+  /* ---------------- preview：一个整屏比例的舞台 ---------------- */
+  const renderPreview = () => {
+    if (detachPreview) { detachPreview(); detachPreview = null; }
+    const isSpeed = editor.editing === 'speed';
+    $('car-dialog-title').textContent = isSpeed ? '调整速度卡' : '调整整屏壁纸';
+    $('car-dialog-body').innerHTML = `
+      <div class="cw-stage" id="cw-stage" data-mode="${isSpeed ? 'speed' : 'main'}"
+        style="aspect-ratio:${editor.box.main.w}/${editor.box.main.h}">
+        <div class="cw-area cw-area-main" id="cw-main-area">
+          <div class="cw-layer" id="cw-main-layer"><img id="cw-main-img" alt="" draggable="false"></div>
+        </div>
+        <div class="cw-area cw-area-speed" id="cw-speed-area"
+          style="left:${speedGeo.leftPct}%;top:${speedGeo.topPct}%;width:${speedGeo.widthPct}%;height:${speedGeo.heightPct}%">
+          <div class="cw-layer" id="cw-speed-layer"><img id="cw-speed-img" alt="" draggable="false"></div>
+        </div>
+      </div>`;
+    $('car-dialog-foot').innerHTML = '<button class="btn small primary" id="cw-done" type="button">完成</button>';
+
+    const stage = $('cw-stage');
+    // 整屏预览不出现速度卡；速度卡预览时整屏图只当背景（不接手势）。
+    $('cw-speed-area').hidden = !isSpeed;
+
+    const paint = () => {
+      for (const key of ['main', 'speed']) {
+        const layer = editor.layers[key];
+        const t = fitOf(key);
+        layer.zoom = t.zoom;
+        layer.panX = t.panX;
+        layer.panY = t.panY;
+        const style = carWallpaperLayerStyle(t);
+        const host = $(`cw-${key}-layer`);
+        host.style.left = style.left;
+        host.style.top = style.top;
+        host.style.width = style.width;
+        host.style.height = style.height;
+        host.hidden = !layer.url;
+        const previewImg = $(`cw-${key}-img`);
+        if (previewImg && layer.url && previewImg.getAttribute('src') !== layer.url) previewImg.src = layer.url;
+      }
+      $('cw-main-area').classList.toggle('background', isSpeed);
+    };
+
+    const pointers = new Map();
+    let drag = null;
+    let pinch = null;
+    const scaleOf = () => {
+      const area = isSpeed ? $('cw-speed-area') : $('cw-main-area');
+      const rect = area.getBoundingClientRect();
+      const box = editor.box[editor.editing];
+      return { kx: rect.width > 0 ? rect.width / box.w : 1, ky: rect.height > 0 ? rect.height / box.h : 1 };
+    };
+
+    const onDown = (event) => {
+      const layer = editor.layers[editor.editing];
+      if (!layer.url) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pointers.size === 1) {
+        const k = scaleOf();
+        drag = {
+          id: event.pointerId,
+          kx: k.kx,
+          ky: k.ky,
+          x: event.clientX,
+          y: event.clientY,
+          panX: layer.panX,
+          panY: layer.panY,
+        };
+        // 抓住指针：拖出舞台边界也要继续收到 move。
+        try { stage.setPointerCapture(event.pointerId); } catch { /* 某些宿主不支持 */ }
+      }
+      if (pointers.size === 2) {
+        const [a, b] = [...pointers.values()];
+        pinch = { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)), zoom: layer.zoom };
+        drag = null;
+      }
+      event.preventDefault();
+    };
+
+    const onMove = (event) => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      const layer = editor.layers[editor.editing];
+      if (pointers.size >= 2 && pinch) {
+        const [a, b] = [...pointers.values()];
+        const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+        layer.zoom = carWallpaperZoom(pinch.zoom * (dist / pinch.dist));
+        paint();
         return;
       }
-      if (!state2.speed) { toast('再选一张速度卡图片'); return; }
-      $('car-dialog').close();
-      carUploadTwoStep(state2);
+      if (!drag || drag.id !== event.pointerId) return;
+      const t = fitOf(editor.editing);
+      const dx = (event.clientX - drag.x) / (drag.kx || 1);
+      const dy = (event.clientY - drag.y) / (drag.ky || 1);
+      const pan = carWallpaperClampPan(drag.panX + dx, drag.panY + dy, t.maxPanX, t.maxPanY);
+      layer.panX = pan.panX;
+      layer.panY = pan.panY;
+      paint();
+    };
+
+    const onUp = (event) => {
+      if (!pointers.has(event.pointerId)) return;
+      pointers.delete(event.pointerId);
+      if (drag && drag.id === event.pointerId) drag = null;
+      if (pointers.size < 2) pinch = null;
+      try { stage.releasePointerCapture(event.pointerId); } catch { /* 没抓住就算了 */ }
+    };
+
+    const onWheel = (event) => {
+      const layer = editor.layers[editor.editing];
+      if (!layer.url) return;
+      event.preventDefault();
+      layer.zoom = carWallpaperZoom(layer.zoom * Math.exp(-event.deltaY * 0.0015));
+      paint();
+    };
+
+    const onDouble = (event) => {
+      event.preventDefault();
+      const layer = editor.layers[editor.editing];
+      layer.zoom = 1;
+      layer.panX = 0;
+      layer.panY = 0;
+      paint();
+    };
+
+    stage.addEventListener('pointerdown', onDown);
+    stage.addEventListener('pointermove', onMove);
+    stage.addEventListener('pointerup', onUp);
+    stage.addEventListener('pointercancel', onUp);
+    stage.addEventListener('wheel', onWheel, { passive: false });
+    stage.addEventListener('dblclick', onDouble);
+
+    $('cw-done').addEventListener('click', () => {
+      editor.view = 'list';
+      render();
     });
-    $('car-dialog').showModal();
+
+    detachPreview = () => {
+      stage.removeEventListener('pointerdown', onDown);
+      stage.removeEventListener('pointermove', onMove);
+      stage.removeEventListener('pointerup', onUp);
+      stage.removeEventListener('pointercancel', onUp);
+      stage.removeEventListener('wheel', onWheel);
+      stage.removeEventListener('dblclick', onDouble);
+    };
+
+    paint();
   };
-  renderStep();
+
+  const openPreview = (area) => {
+    editor.editing = area;
+    editor.view = 'preview';
+    render();
+  };
+
+  /* ---------------- 导出：canvas 按整屏/速度卡输出尺寸 + 同一份 transform ---------------- */
+  const exportLayer = async (key) => {
+    const layer = editor.layers[key];
+    if (!layer.url || !layer.img) return null;
+    const box = editor.box[key];
+    const t = fitOf(key);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(box.w));
+    canvas.height = Math.max(1, Math.round(box.h));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(layer.img, t.offsetX, t.offsetY, t.drawW, t.drawH);
+    const blob = await new Promise((resolve) => { canvas.toBlob(resolve, 'image/jpeg', 0.92); });
+    if (!blob) throw new Error('导出失败：浏览器拿不到 canvas 数据');
+    const name = (editor.name.trim() || layer.file.name.replace(/\.[^.]+$/, '') || 'wallpaper').slice(0, 24);
+    return new File([blob], `${name}-${key}-${canvas.width}x${canvas.height}.jpg`, { type: 'image/jpeg' });
+  };
+
+  const render = () => (editor.view === 'preview' ? renderPreview() : renderList());
+
+  $('car-dialog').showModal();
+  render();
 }
 
-/** 两步上传：两次 multipart，第二次带 type=2。 */
-async function carUploadTwoStep({ main, speed, name }) {
-  if (!state.vin) { toast('还没有读到车'); return; }
+/** 读本地图片为 Image（Blob URL，不联网）。 */
+function carReadLocalImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve({ img, url });
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('这张图解不开（换 jpg/png 试试）'));
+    };
+    img.src = url;
+  });
+}
+
+/**
+ * 保存：把**裁切好的**图按官方两步 multipart 传上去（type=1 整屏、type=2 速度卡）。
+ * `wallpaperContent` 里的地址只有上传成功后才可能拿到，所以先用 pending:// 占位；
+ * 第 1 张若回带了地址，就替换进第 2 张的 content。
+ */
+async function carUploadWallpaper({ mainFile, speedFile, name }) {
   const endpoint = byId('wallpaper_save');
   const url = buildUrl(endpoint.path, endpoint.params, { vinNo: state.vin });
-  const content = carBuildWallpaperContent({ mainUrl: 'pending://main', speedCardUrl: 'pending://speed' });
+  const steps = [
+    { type: '1', file: mainFile.name, bytes: carFormatBytes(mainFile.size), wallpaperName: name },
+    ...(speedFile ? [{ type: '2', file: speedFile.name, bytes: carFormatBytes(speedFile.size), wallpaperName: name }] : []),
+  ];
   carConfirm({
-    title: '上传壁纸（两步）',
-    sub: `${main.name} → 整屏；${speed.name} → 速度卡`,
-    body: {
-      url,
-      steps: [
-        { type: '1', file: main.name, wallpaperName: name || main.name.replace(/\.[^.]+$/, ''), vinNo: state.vin, wallpaperContent: content },
-        { type: '2', file: speed.name, wallpaperName: name || main.name.replace(/\.[^.]+$/, ''), vinNo: state.vin, wallpaperContent: content },
-      ],
-    },
+    title: '保存壁纸（上传裁切后的图）',
+    sub: speedFile ? '整屏 + 速度卡 各一张' : '只传整屏（速度卡留空）',
+    body: { url, steps },
     run: async () => {
       const useOwn = state.mode !== 'panel' || hasOwnCredentials();
-      const upload = async (file, type) => {
+      const upload = async (file, type, content) => {
         const form = new FormData();
         form.append('file', file, file.name);
-        form.append('wallpaperName', name || file.name.replace(/\.[^.]+$/, '').slice(0, 24));
+        form.append('wallpaperName', name);
         form.append('vinNo', state.vin);
         form.append('type', String(type));
         form.append('wallpaperContent', content);
@@ -461,15 +749,40 @@ async function carUploadTwoStep({ main, speed, name }) {
         if (!(response.ok && (data?.code === '10000' || data?.code === undefined))) {
           throw new Error(`第 ${type} 步失败：${data?.message || `HTTP ${response.status}`}`);
         }
+        return data;
       };
-      await upload(main, 1);
-      await sleep(400);
-      await upload(speed, 2);
-      toast('两张都传好了，去列表里应用');
+      const first = await upload(mainFile, 1, carBuildWallpaperContent({ mainUrl: 'pending://main', speedCardUrl: '' }));
+      const firstUrl = carPickUploadedUrl(first?.data ?? first);
+      if (speedFile) {
+        await sleep(400);
+        await upload(speedFile, 2, carBuildWallpaperContent({
+          mainUrl: firstUrl || 'pending://main',
+          speedCardUrl: 'pending://speed',
+        }));
+      }
+      toast(speedFile ? '两张都传好了，去列表里应用' : '整屏壁纸已传好，去列表里应用');
       await carLoadWallpaper();
     },
   });
 }
+
+/** 上传响应里可能带文件地址（字段名不确定）：取第一个 http(s) 字符串。 */
+function carPickUploadedUrl(data) {
+  const seen = new Set();
+  const walk = (node, depth) => {
+    if (!node || depth > 4) return '';
+    if (typeof node === 'string') return /^https?:\/\//i.test(node.trim()) ? node.trim() : '';
+    if (typeof node !== 'object' || seen.has(node)) return '';
+    seen.add(node);
+    for (const value of Object.values(node)) {
+      const hit = walk(value, depth + 1);
+      if (hit) return hit;
+    }
+    return '';
+  };
+  return walk(data, 0);
+}
+
 
 function carApplyWallpaper(wall) {
   const payload = carBuildUseWallpaperBody(wall.id, state.vin);
@@ -555,37 +868,6 @@ async function carPollProgress(recordId) {
   }, 1500);
 }
 
-async function carUploadWallpaper(file) {
-  if (!file) return;
-  if (!state.vin) { toast('还没有读到车'); return; }
-  const endpoint = byId('wallpaper_save');
-  const url = buildUrl(endpoint.path, endpoint.params, { vinNo: state.vin });
-  const form = new FormData();
-  form.append('file', file, file.name);
-  form.append('wallpaperName', file.name.replace(/\.[^.]+$/, '').slice(0, 24));
-  form.append('vinNo', state.vin);
-  carConfirm({
-    title: '上传自定义壁纸',
-    sub: `${file.name} · ${carFormatBytes(file.size)}（multipart，字段名与签名体官方没公开，按 file + 空 body 试）`,
-    body: { url, fields: ['file', 'wallpaperName', 'vinNo'] },
-    run: async () => {
-      const useOwn = state.mode !== 'panel' || hasOwnCredentials();
-      const headers = useOwn ? ownHeaders(url, 'POST', '') : panelHeaders(url, 'POST', '');
-      if (state.token) headers.Authorization = `Bearer ${state.token}`;
-      delete headers['Content-Type'];
-      const response = await fetch(url, { method: 'POST', headers, body: form, cache: 'no-store' });
-      const text = await response.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch { /* 非 JSON */ }
-      if (!(response.ok && (data?.code === '10000' || data?.code === undefined))) {
-        throw new Error(data?.message || `HTTP ${response.status}`);
-      }
-      toast('已上传');
-      await carLoadWallpaper();
-    },
-  });
-}
-
 /* ---------------------------- 确认弹层 ---------------------------- */
 
 let carConfirmRun = null;
@@ -626,13 +908,10 @@ carOn('btn-wall-edit', 'click', () => {
   if (!wall) { toast('还没有壁纸，先上传一张'); return; }
   carRenameWallpaper(wall);
 });
-carOn('btn-wall-upload', 'click', () => $('wp-file')?.click());
-carOn('btn-wall-create', 'click', () => carCreateWallpaperWizard());
-carOn('wp-file', 'change', (event) => {
-  const file = event.target.files?.[0];
-  event.target.value = '';
-  void carUploadWallpaper(file);
-});
+// 「上传新壁纸」「新建壁纸」都走同一个本地定位编辑器：选图 → 拖拽/缩放 → 保存才上传。
+carOn('btn-wall-upload', 'click', () => carCreateWallpaper());
+carOn('btn-wp-new', 'click', () => carCreateWallpaper());
+carOn('btn-wall-create', 'click', () => carCreateWallpaper());
 carOn('cc-check', 'change', (event) => { $('cc-ok').disabled = !event.target.checked; });
 carOn('cc-ok', 'click', async () => {
   const run = carConfirmRun;

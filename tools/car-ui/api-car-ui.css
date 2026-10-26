@@ -84,4 +84,52 @@
   .car-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
   .car-walls { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
 }
+
+/* ---------------- 壁纸本地定位编辑器 ----------------
+   列表视图：两个缩略图（整屏 16:9 / 速度卡竖长方形），比例由 JS 按真实像素算；
+   预览视图：一个整屏比例的舞台，图层位置全用百分比（wallpaperLayerStyle 算），换窗口尺寸不跑位。 */
+.cw-grid { display: flex; align-items: flex-start; gap: 12px; }
+/* 两个缩略图等高（132px）：整屏横向铺满剩余宽度，速度卡按竖长比自动定宽。 */
+.cw-thumb {
+  position: relative; flex: none; height: 132px; padding: 0; overflow: hidden; cursor: pointer;
+  border: 1px solid var(--line); border-radius: 12px; background: #0b0b0e; color: inherit;
+}
+.cw-thumb[data-area="main"] { flex: 1 1 auto; min-width: 0; }
+.cw-thumb-speed { aspect-ratio: 272 / 516; height: 132px; }
+.cw-thumb-box { position: absolute; inset: 0; display: grid; place-items: center; }
+.cw-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cw-thumb.empty .cw-thumb-box::after {
+  content: '+'; font-size: 26px; line-height: 1; color: #ffffff8a; font-weight: 300;
+}
+.cw-thumb.empty img { display: none; }
+.cw-thumb-tag {
+  position: absolute; left: 6px; top: 6px; padding: 1px 7px; border-radius: 999px;
+  font-size: 10px; background: #000a; color: #fff; pointer-events: none;
+}
+
+.cw-stage {
+  position: relative; width: 100%; overflow: hidden;
+  border-radius: 12px; border: 1px solid var(--line); background: #0b0b0e;
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab;
+}
+.cw-stage:active { cursor: grabbing; }
+.cw-area { position: absolute; overflow: hidden; }
+.cw-area-main { inset: 0; }
+/* 速度卡预览：整屏图只当背景，手势交给中间那块；整屏预览时这块直接不渲染。 */
+.cw-area-main.background { pointer-events: none; }
+.cw-area-speed {
+  border-radius: 8px; background: #0002;
+  /* 速度卡边界：浅色壁纸上也要看得见 */
+  box-shadow: 0 0 0 1.5px #ffffffd9, 0 8px 26px #0006;
+  outline: 1px dashed #00000055; outline-offset: -1px;
+}
+.cw-layer { position: absolute; will-change: left, top, width, height; }
+.cw-layer img { width: 100%; height: 100%; display: block; object-fit: fill; pointer-events: none; }
+.cw-layer[hidden] { display: none; }
+
+.cw-out { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.cw-out img { width: 72px; height: 41px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+.cw-out-txt { flex: 1; min-width: 0; }
+.cw-out-txt b { display: block; font-size: 12px; font-weight: 550; word-break: break-all; }
+.cw-out-txt small { display: block; font-size: 11px; color: var(--ink-faint); }
 /* ==== ZEEHO_CAR_UI:CSS:END ==== */

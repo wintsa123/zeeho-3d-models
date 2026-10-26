@@ -105,7 +105,7 @@ function zeCarEnsureSettingsEntry() {
     <div class="section-title ze-car-entry-title"><span>车机工具</span><span class="line"></span></div>
     <section class="card group-card">
       <button class="group-head ze-car-open" type="button" data-ze-route="wallpaper">
-        <span class="gt">车机壁纸</span><span class="gc">整屏 + 速度卡 · 两步上传</span>
+        <span class="gt">车机壁纸</span><span class="gc">整屏 + 速度卡 · 本地调位后保存</span>
         <span class="gv"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg></span>
       </button>
     </section>`;

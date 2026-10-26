@@ -40,6 +40,9 @@ const MEDIA_EXPORTS = [
   'normalizeOtaFile', 'normalizeCheckVersion', 'normalizeOtaList', 'normalizeOtaRecord',
   'normalizeOtaStatus', 'findOtaFiles', 'maskWifiAddress', 'maskSignedUrl', 'formatBytes',
   'parseWallpaperAreas', 'buildWallpaperContent',
+  // 壁纸「本地定位」几何：预览与导出共用同一份 transform（见 sdk/vehicle-media.js）
+  'wallpaperCoverScale', 'clampWallpaperZoom', 'wallpaperFitTransform', 'wallpaperLayerStyle',
+  'clampWallpaperPan', 'wallpaperSpeedCardBox', 'WALLPAPER_ZOOM_MIN', 'WALLPAPER_ZOOM_MAX',
 ];
 
 function toIifeBody(source) {
